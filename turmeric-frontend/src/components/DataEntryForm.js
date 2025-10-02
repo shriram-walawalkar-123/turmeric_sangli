@@ -44,6 +44,34 @@ const DataEntryForm = ({ userRole }) => {
     return true;
   };
 
+  const buildSubmitData = () => {
+    const data = { ...formData };
+
+    // Normalize supplier shopkeeper list (textarea or array)
+    if (userRole === 'supplier') {
+      const raw = data.shopkeeper_list;
+      if (Array.isArray(raw)) {
+        data.shopkeeper_list = raw;
+      } else if (typeof raw === 'string' && raw.trim() !== '') {
+        data.shopkeeper_list = raw.split(',').map(s => s.trim()).filter(Boolean);
+      } else {
+        data.shopkeeper_list = [];
+      }
+    }
+
+    // Normalize numbers for processing
+    if (userRole === 'processor') {
+      if (data.moisture_content !== undefined && data.moisture_content !== '') {
+        data.moisture_content = Number(data.moisture_content);
+      }
+      if (data.curcumin_content !== undefined && data.curcumin_content !== '') {
+        data.curcumin_content = Number(data.curcumin_content);
+      }
+    }
+
+    return data;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -55,7 +83,8 @@ const DataEntryForm = ({ userRole }) => {
     setError('');
     setSuccess('');
 
-try {
+    try {
+      const submitData = buildSubmitData();
       let response;
       
       switch (userRole) {
@@ -81,13 +110,13 @@ try {
           throw new Error('Invalid role');
       }
       
-      setSuccess('Data submitted successfully!');
+      setSuccess(response?.data?.message || 'Data submitted successfully!');
       setFormData({});
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to submit data');
+      setError(err.response?.data?.error || err.message || 'Failed to submit data');
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
   };
 
@@ -191,12 +220,12 @@ try {
           {loading ? (
             <>
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-              <span>Submitting to Blockchain...</span>
+              <span>Submitting...</span>
             </>
           ) : (
             <>
               <Save size={20} />
-              <span>Submit to Blockchain</span>
+              <span>Submit</span>
             </>
           )}
         </button>

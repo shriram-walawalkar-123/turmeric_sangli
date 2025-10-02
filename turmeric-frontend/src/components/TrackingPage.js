@@ -29,29 +29,40 @@ const TrackingPage = () => {
     }
   };
 
-  const renderStageCard = (title, data,icon) => {
-    if (!data || Object.keys(data).length === 0) return null;
+  const renderObject = (obj) => {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {Object.entries(obj).map(([key, value]) => {
+          if (typeof value === 'object' || value === null || value === '') return null;
+          return (
+            <div key={key} className="border-l-4 border-green-500 pl-3">
+              <p className="text-sm text-gray-600 font-medium">
+                {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+              </p>
+              <p className="text-gray-800">{value.toString()}</p>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderStageCard = (title, data) => {
+    if (!data) return null;
+
+    const items = Array.isArray(data) ? data : [data];
+    if (items.length === 0) return null;
 
     return (
       <div className="bg-white rounded-lg shadow-md p-6 mb-4">
         <div className="flex items-center mb-4">
-
           <h3 className="text-xl font-semibold text-gray-800">{title}</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {Object.entries(data).map(([key, value]) => {
-            if (typeof value === 'object' || value === null || value === '') return null;
-            
-            return (
-              <div key={key} className="border-l-4 border-green-500 pl-3">
-                <p className="text-sm text-gray-600 font-medium">
-                  {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                </p>
-                <p className="text-gray-800">{value.toString()}</p>
-              </div>
-            );
-          })}
-        </div>
+        {items.map((item, idx) => (
+          <div key={idx} className="mb-4 last:mb-0">
+            {renderObject(item)}
+          </div>
+        ))}
       </div>
     );
   };
@@ -101,12 +112,12 @@ const TrackingPage = () => {
             </div>
           </div>
 
-          {renderStageCard('Packet Information', journeyData.packet, Package)}
-          {renderStageCard('Harvest Details', journeyData.harvest, MapPin)}
-          {renderStageCard('Processing & Quality Check', journeyData.processing, CheckCircle)}
-          {renderStageCard('Distribution', journeyData.distributor, Package)}
-          {renderStageCard('Supplier', journeyData.supplier, Package)}
-          {renderStageCard('Retail Store', journeyData.shopkeeper, Package)}
+          {renderStageCard('Packet Information', journeyData.packet)}
+          {renderStageCard('Harvest Details', journeyData.harvest)}
+          {renderStageCard('Processing & Quality Check', journeyData.processing)}
+          {renderStageCard('Distribution', journeyData.distributor)}
+          {renderStageCard('Supplier', journeyData.supplier)}
+          {renderStageCard('Retail Store', journeyData.shopkeeper)}
         </div>
       )}
 

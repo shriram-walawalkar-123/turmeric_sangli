@@ -1,30 +1,25 @@
 const express = require("express");
 const router = express.Router();
-const { contract, signer } = require("./contract");
 
-// ✅ 1. Read full journey
-router.get("/journey/:packetId", async (req, res) => {
-  try {
-    const packetId = req.params.packetId;
-    const result = await contract.getFullJourney(packetId);
-    res.json({
-      packet: result[0],
-      harvest: result[1],
-      processing: result[2],
-      distributor: result[3],
-      supplier: result[4],
-      shopkeeper: result[5],
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.reason || error.message });
-  }
-});
+// In-memory storage (temporary, resets on server restart)
+const harvests = [];
+const processings = [];
+const distributors = [];
+const suppliers = [];
+const shopkeepers = [];
+const packets = [];
+const activities = [];
 
-// ✅ 2. Add Harvest (server signs tx — must have PROCESSOR_ROLE per contract)
+function addActivity(type, data) {
+  const entry = { type, timestamp: new Date().toISOString(), data };
+  activities.push(entry);
+  if (activities.length > 200) activities.shift();
+}
+
+// Harvest
 router.post("/harvest", async (req, res) => {
+  console.log("Received harvest data:", req.body);
   try {
-    if (!signer) return res.status(403).json({ error: "Server cannot sign transactions." });
-
     const { batch_id, RnR_farmer_id, product_name, harvest_date, gps_coordinates, fertilizer, organic_status } = req.body;
 
     const harvestStruct = {
@@ -37,20 +32,23 @@ router.post("/harvest", async (req, res) => {
       organic_status
     };
 
-    const tx = await contract.addHarvest(batch_id, harvestStruct);
-    const receipt = await tx.wait();
+    harvests.push(harvestStruct);
+    addActivity("harvest", harvestStruct);
 
-    res.json({ txHash: receipt.transactionHash });
+    return res.status(200).json({
+      message: "Harvest data received successfully",
+      data: harvestStruct
+    });
   } catch (error) {
-    res.status(500).json({ error: error.reason || error.message });
+    return res.status(500).json({ error: error.message || String(error) });
   }
 });
 
-// ✅ 3. Add Processing & Packaging (PROCESSOR_ROLE)
-router.post("/processing", async (req, res) => {
-  try {
-    if (!signer) return res.status(403).json({ error: "Server cannot sign transactions." });
 
+// Processing & Packaging
+router.post("/processing", async (req, res) => {
+  console.log("Received processing data:", req.body);
+  try {
     const {
       batch_id,
       processing_gps,
@@ -71,8 +69,8 @@ router.post("/processing", async (req, res) => {
       processing_gps,
       grinding_facility_name,
       lab_report_ipfs_hash,
-      moisture_content: Number(moisture_content),
-      curcumin_content: Number(curcumin_content),
+      moisture_content: moisture_content !== undefined ? Number(moisture_content) : undefined,
+      curcumin_content: curcumin_content !== undefined ? Number(curcumin_content) : undefined,
       heavy_metals,
       physical_properties,
       packaging_date,
@@ -81,19 +79,24 @@ router.post("/processing", async (req, res) => {
       expiry_date,
     };
 
-    const tx = await contract.addProcessing(batch_id, processingStruct);
-    const receipt = await tx.wait();
-    res.json({ txHash: receipt.transactionHash });
+    processings.push(processingStruct);
+    addActivity("processing", processingStruct);
+
+    return res.status(200).json({
+      message: "Processing data received successfully",
+      data: processingStruct
+    });
   } catch (error) {
-    res.status(500).json({ error: error.reason || error.message });
+    return res.status(500).json({ error: error.message || String(error) });
   }
 });
 
-// ✅ 4. Add Distributor (DISTRIBUTOR_ROLE)
+// Distributor
 router.post("/distributor", async (req, res) => {
+  console.log("Received distributor data:", req.body);
   try {
-    if (!signer) return res.status(403).json({ error: "Server cannot sign transactions." });
     const { distributor_id, packet_id, gps_coordinates, box_code, dispatch_date, tracking_number } = req.body;
+
     const distributorStruct = {
       distributor_id,
       packet_id,
@@ -102,19 +105,25 @@ router.post("/distributor", async (req, res) => {
       dispatch_date,
       tracking_number,
     };
-    const tx = await contract.addDistributor(packet_id, distributorStruct);
-    const receipt = await tx.wait();
-    res.json({ txHash: receipt.transactionHash });
+
+    distributors.push(distributorStruct);
+    addActivity("distributor", distributorStruct);
+
+    return res.status(200).json({
+      message: "Distributor data received successfully",
+      data: distributorStruct
+    });
   } catch (error) {
-    res.status(500).json({ error: error.reason || error.message });
+    return res.status(500).json({ error: error.message || String(error) });
   }
 });
 
-// ✅ 5. Add Supplier (SUPPLIER_ROLE)
+// Supplier
 router.post("/supplier", async (req, res) => {
+  console.log("Received supplier data:", req.body);
   try {
-    if (!signer) return res.status(403).json({ error: "Server cannot sign transactions." });
     const { supplier_id, packet_id, gps_coordinates, receipt_date, shopkeeper_list } = req.body;
+
     const normalizedShopkeepers = Array.isArray(shopkeeper_list)
       ? shopkeeper_list
       : typeof shopkeeper_list === "string" && shopkeeper_list.trim() !== ""
@@ -128,19 +137,25 @@ router.post("/supplier", async (req, res) => {
       receipt_date,
       shopkeeper_list: normalizedShopkeepers,
     };
-    const tx = await contract.addSupplier(packet_id, supplierStruct);
-    const receipt = await tx.wait();
-    res.json({ txHash: receipt.transactionHash });
+
+    suppliers.push(supplierStruct);
+    addActivity("supplier", supplierStruct);
+
+    return res.status(200).json({
+      message: "Supplier data received successfully",
+      data: supplierStruct
+    });
   } catch (error) {
-    res.status(500).json({ error: error.reason || error.message });
+    return res.status(500).json({ error: error.message || String(error) });
   }
 });
 
-// ✅ 6. Add Shopkeeper (SHOPKEEPER_ROLE)
+// Shopkeeper
 router.post("/shopkeeper", async (req, res) => {
+  console.log("Received shopkeeper data:", req.body);
   try {
-    if (!signer) return res.status(403).json({ error: "Server cannot sign transactions." });
     const { shopkeeper_id, packet_id, gps_coordinates, date_received, shelf_life_expiry } = req.body;
+
     const shopkeeperStruct = {
       shopkeeper_id,
       packet_id,
@@ -148,114 +163,99 @@ router.post("/shopkeeper", async (req, res) => {
       date_received,
       shelf_life_expiry,
     };
-    const tx = await contract.addShopkeeper(packet_id, shopkeeperStruct);
-    const receipt = await tx.wait();
-    res.json({ txHash: receipt.transactionHash });
+
+    shopkeepers.push(shopkeeperStruct);
+    addActivity("shopkeeper", shopkeeperStruct);
+
+    return res.status(200).json({
+      message: "Shopkeeper data received successfully",
+      data: shopkeeperStruct
+    });
   } catch (error) {
-    res.status(500).json({ error: error.reason || error.message });
+    return res.status(500).json({ error: error.message || String(error) });
   }
 });
 
-// ✅ 7. Add Packet (PROCESSOR_ROLE)
+// Packet
 router.post("/packet", async (req, res) => {
+  console.log("Received packet data:", req.body);
   try {
-    if (!signer) return res.status(403).json({ error: "Server cannot sign transactions." });
     const { unique_packet_id, batch_id, ipfs_hash, current_stage } = req.body;
+
     const packetStruct = {
       unique_packet_id,
       batch_id,
       ipfs_hash,
       current_stage,
     };
-    const tx = await contract.addPacket(unique_packet_id, packetStruct);
-    const receipt = await tx.wait();
-    res.json({ txHash: receipt.transactionHash });
+
+    packets.push(packetStruct);
+    addActivity("packet", packetStruct);
+
+    return res.status(200).json({
+      message: "Packet data received successfully",
+      data: packetStruct
+    });
   } catch (error) {
-    res.status(500).json({ error: error.reason || error.message });
+    return res.status(500).json({ error: error.message || String(error) });
   }
 });
 
-// ✅ 3. Grant Farmer Role (only ADMIN can do this)
-router.post("/roles/farmer", async (req, res) => {
+// Journey placeholder: aggregate by packetId
+router.get("/journey/:packetId", async (req, res) => {
+  console.log("Fetching journey for packetId:", req.params.packetId);
   try {
-    const { address } = req.body;
-    const tx = await contract.grantFarmerRole(address);
-    const receipt = await tx.wait();
-    res.json({ txHash: receipt.transactionHash });
+    const packetId = req.params.packetId;
+
+    const byPacketId = (item) => (
+      item.packet_id === packetId ||
+      item.unique_packet_id === packetId ||
+      item.batch_id === packetId
+    );
+
+    const result = {
+      packet: packets.filter(byPacketId),
+      harvest: harvests.filter(byPacketId),
+      processing: processings.filter(byPacketId),
+      distributor: distributors.filter(byPacketId),
+      supplier: suppliers.filter(byPacketId),
+      shopkeeper: shopkeepers.filter(byPacketId),
+    };
+
+    return res.status(200).json(result);
   } catch (error) {
-    res.status(500).json({ error: error.reason || error.message });
+    return res.status(500).json({ error: error.message || String(error) });
   }
 });
 
-// Additional role grants (optional helpers)
-router.post("/roles/processor", async (req, res) => {
-  try {
-    const { address } = req.body;
-    const tx = await contract.grantProcessorRole(address);
-    const receipt = await tx.wait();
-    res.json({ txHash: receipt.transactionHash });
-  } catch (error) {
-    res.status(500).json({ error: error.reason || error.message });
-  }
-});
-
-router.post("/roles/distributor", async (req, res) => {
-  try {
-    const { address } = req.body;
-    const tx = await contract.grantDistributorRole(address);
-    const receipt = await tx.wait();
-    res.json({ txHash: receipt.transactionHash });
-  } catch (error) {
-    res.status(500).json({ error: error.reason || error.message });
-  }
-});
-
-router.post("/roles/supplier", async (req, res) => {
-  try {
-    const { address } = req.body;
-    const tx = await contract.grantSupplierRole(address);
-    const receipt = await tx.wait();
-    res.json({ txHash: receipt.transactionHash });
-  } catch (error) {
-    res.status(500).json({ error: error.reason || error.message });
-  }
-});
-
-router.post("/roles/shopkeeper", async (req, res) => {
-  try {
-    const { address } = req.body;
-    const tx = await contract.grantShopkeeperRole(address);
-    const receipt = await tx.wait();
-    res.json({ txHash: receipt.transactionHash });
-  } catch (error) {
-    res.status(500).json({ error: error.reason || error.message });
-  }
-});
-
-// Lightweight stats for dashboard
+// Stats placeholder
 router.get("/stats", async (_req, res) => {
+  console.log("Fetching stats");
   try {
-    res.json({
-      totalPackets: 0,
-      totalBatches: 0,
+    return res.status(200).json({
+      totalPackets: packets.length,
+      totalBatches: new Set([...harvests, ...processings, ...packets].map(i => i.batch_id).filter(Boolean)).size,
       roles: {
-        farmers: 0,
-        processors: 0,
-        distributors: 0,
-        suppliers: 0,
-        shopkeepers: 0,
+        farmers: new Set(harvests.map(h => h.RnR_farmer_id).filter(Boolean)).size,
+        processors: new Set(processings.map(p => p.grinding_facility_name).filter(Boolean)).size,
+        distributors: new Set(distributors.map(d => d.distributor_id).filter(Boolean)).size,
+        suppliers: new Set(suppliers.map(s => s.supplier_id).filter(Boolean)).size,
+        shopkeepers: new Set(shopkeepers.map(s => s.shopkeeper_id).filter(Boolean)).size,
       },
     });
   } catch (error) {
-    res.status(500).json({ error: error.reason || error.message });
+    return res.status(500).json({ error: error.message || String(error) });
   }
 });
 
+// Activity placeholder
 router.get("/activity", async (_req, res) => {
+  console.log("Fetching recent activity");
   try {
-    res.json([]);
+    const last = activities.slice(-50).reverse();
+    return res.status(200).json(last);
   } catch (error) {
-    res.status(500).json({ error: error.reason || error.message });
+    return res.status(500).json({ error: error.message || String(error) });
   }
 });
 
