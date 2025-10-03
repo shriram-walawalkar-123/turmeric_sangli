@@ -13,7 +13,8 @@ const activities = [];
 function addActivity(type, data) {
   const entry = { type, timestamp: new Date().toISOString(), data };
   activities.push(entry);
-  if (activities.length > 200) activities.shift();
+  if (activities.length > 200) 
+  activities.shift();
 }
 
 // Harvest
@@ -43,7 +44,6 @@ router.post("/harvest", async (req, res) => {
     return res.status(500).json({ error: error.message || String(error) });
   }
 });
-
 
 // Processing & Packaging
 router.post("/processing", async (req, res) => {
