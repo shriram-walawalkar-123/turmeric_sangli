@@ -6,12 +6,15 @@ Follow the steps below to run the project locally.
 ---
 
 ## 🚀 Project Setup Guide
+###
 
 ### 📦 1. Clone the Repository
 ```bash
 git clone https://github.com/shriram-walawalkar-123/turmeric_sangli.git
 cd turmeric-sangli
-
+###
+###
+---
 🖥️ Frontend Setup
 
 📁 Navigate to the frontend folder:
@@ -22,7 +25,8 @@ npm install (optional)
 npm start
 
 The frontend will start on http://localhost:3001 by default.
-
+###
+###
 ⚙️ Backend Setup
 
 📁 Navigate to the backend folder:
