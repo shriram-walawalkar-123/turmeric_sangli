@@ -21,10 +21,10 @@ function addActivity(type, data) {
 router.post("/harvest", async (req, res) => {
   console.log("Received harvest data:", req.body);
   try {
-    const { batch_id, RnR_farmer_id, product_name, harvest_date, gps_coordinates, fertilizer, organic_status } = req.body;
+    const { batch_id, farmer_id, product_name, harvest_date, gps_coordinates, fertilizer, organic_status } = req.body;
 
     const harvestStruct = {
-      RnR_farmer_id,
+      farmer_id,
       product_name,
       batch_id,
       harvest_date,
@@ -53,30 +53,32 @@ router.post("/processing", async (req, res) => {
       batch_id,
       processing_gps,
       grinding_facility_name,
-      lab_report_ipfs_hash,
       moisture_content,
       curcumin_content,
       heavy_metals,
       physical_properties,
       packaging_date,
       packaging_unit,
-      batch_coding,
+      packet_id,
       expiry_date,
+      sending_box_code,
+      distributor_id
     } = req.body;
 
     const processingStruct = {
       batch_id,
       processing_gps,
       grinding_facility_name,
-      lab_report_ipfs_hash,
       moisture_content: moisture_content !== undefined ? Number(moisture_content) : undefined,
       curcumin_content: curcumin_content !== undefined ? Number(curcumin_content) : undefined,
       heavy_metals,
       physical_properties,
       packaging_date,
       packaging_unit,
-      batch_coding,
+      packet_id,
       expiry_date,
+      sending_box_code,
+      distributor_id
     };
 
     processings.push(processingStruct);
@@ -95,15 +97,15 @@ router.post("/processing", async (req, res) => {
 router.post("/distributor", async (req, res) => {
   console.log("Received distributor data:", req.body);
   try {
-    const { distributor_id, packet_id, gps_coordinates, box_code, dispatch_date, tracking_number } = req.body;
+    const { distributor_id, gps_coordinates, received_box_code, dispatch_date, sending_box_code, supplier_id} = req.body;
 
     const distributorStruct = {
       distributor_id,
-      packet_id,
       gps_coordinates,
-      box_code,
+      received_box_code,
       dispatch_date,
-      tracking_number,
+      sending_box_code,
+      supplier_id
     };
 
     distributors.push(distributorStruct);
@@ -122,20 +124,15 @@ router.post("/distributor", async (req, res) => {
 router.post("/supplier", async (req, res) => {
   console.log("Received supplier data:", req.body);
   try {
-    const { supplier_id, packet_id, gps_coordinates, receipt_date, shopkeeper_list } = req.body;
-
-    const normalizedShopkeepers = Array.isArray(shopkeeper_list)
-      ? shopkeeper_list
-      : typeof shopkeeper_list === "string" && shopkeeper_list.trim() !== ""
-        ? shopkeeper_list.split(",").map((s) => s.trim())
-        : [];
+    const {supplier_id, received_box_code, gps_coordinates, receipt_date, shopkeeper_id, packet_id } = req.body;
 
     const supplierStruct = {
       supplier_id,
-      packet_id,
+      received_box_code,
       gps_coordinates,
       receipt_date,
-      shopkeeper_list: normalizedShopkeepers,
+      shopkeeper_id,
+      packet_id
     };
 
     suppliers.push(supplierStruct);
@@ -154,14 +151,13 @@ router.post("/supplier", async (req, res) => {
 router.post("/shopkeeper", async (req, res) => {
   console.log("Received shopkeeper data:", req.body);
   try {
-    const { shopkeeper_id, packet_id, gps_coordinates, date_received, shelf_life_expiry } = req.body;
+    const {shopkeeper_id, packet_id, gps_coordinates, date_received } = req.body;
 
     const shopkeeperStruct = {
       shopkeeper_id,
       packet_id,
       gps_coordinates,
-      date_received,
-      shelf_life_expiry,
+      date_received
     };
 
     shopkeepers.push(shopkeeperStruct);
@@ -180,12 +176,11 @@ router.post("/shopkeeper", async (req, res) => {
 router.post("/packet", async (req, res) => {
   console.log("Received packet data:", req.body);
   try {
-    const { unique_packet_id, batch_id, ipfs_hash, current_stage } = req.body;
+    const { unique_packet_id, batch_id, current_stage } = req.body;
 
     const packetStruct = {
       unique_packet_id,
       batch_id,
-      ipfs_hash,
       current_stage,
     };
 

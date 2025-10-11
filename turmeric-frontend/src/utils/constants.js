@@ -62,7 +62,7 @@ export const STAGE_STATUS = {
 
 export const FORM_FIELDS = {
   HARVEST: [
-    { name: 'RnR_farmer_id', label: 'Farmer ID (RnR)', type: 'text', required: true },
+    { name: 'farmer_id', label: 'Farmer ID', type: 'text', required: true },
     { name: 'product_name', label: 'Product Name', type: 'text', required: true },
     { name: 'batch_id', label: 'Batch ID', type: 'text', required: true },
     { name: 'harvest_date', label: 'Harvest Date', type: 'date', required: true },
@@ -74,36 +74,37 @@ export const FORM_FIELDS = {
     { name: 'batch_id', label: 'Batch ID', type: 'text', required: true },
     { name: 'processing_gps', label: 'Processing GPS', type: 'text', required: true },
     { name: 'grinding_facility_name', label: 'Grinding Facility Name', type: 'text', required: true },
-    { name: 'lab_report_ipfs_hash', label: 'Lab Report IPFS Hash', type: 'text', required: true },
     { name: 'moisture_content', label: 'Moisture Content (%)', type: 'number', required: true },
     { name: 'curcumin_content', label: 'Curcumin Content (%)', type: 'number', required: true },
     { name: 'heavy_metals', label: 'Heavy Metals Test Result', type: 'text', required: true },
     { name: 'physical_properties', label: 'Physical Properties', type: 'text', required: false },
     { name: 'packaging_date', label: 'Packaging Date', type: 'date', required: true },
     { name: 'packaging_unit', label: 'Packaging Unit', type: 'text', required: true },
-    { name: 'batch_coding', label: 'Batch Coding', type: 'text', required: true },
-    { name: 'expiry_date', label: 'Expiry Date', type: 'date', required: true }
+    { name: 'packet_id', label: 'packet_id', type: 'text', required: true },
+    { name: 'expiry_date', label: 'Expiry Date', type: 'date', required: true },
+    { name: 'distributor_id', label: 'Distributor ID', type: 'text', required: true },
+    { name: 'sending_box_code_id', label: 'sending_box_code ID', type: 'text', required: true }
   ],
   DISTRIBUTOR: [
     { name: 'distributor_id', label: 'Distributor ID', type: 'text', required: true },
-    { name: 'packet_id', label: 'Packet ID', type: 'text', required: true },
+    { name: 'received_box_code_id', label: 'received_box_code ID', type: 'text', required: true },
+    { name: 'sending_box_code_id', label: 'sending_box_code ID', type: 'text', required: true },
     { name: 'gps_coordinates', label: 'GPS Coordinates', type: 'text', required: true },
-    { name: 'box_code', label: 'Box Code', type: 'text', required: true },
     { name: 'dispatch_date', label: 'Dispatch Date', type: 'date', required: true },
-    { name: 'tracking_number', label: 'Tracking Number', type: 'text', required: true }
+    { name: 'supplier_id', label: 'Supplier ID', type: 'text', required: true }
   ],
   SUPPLIER: [
     { name: 'supplier_id', label: 'Supplier ID', type: 'text', required: true },
+    { name: 'received_box_code', label: 'received_box_code ID', type: 'text', required: true },
     { name: 'packet_id', label: 'Packet ID', type: 'text', required: true },
     { name: 'gps_coordinates', label: 'GPS Coordinates', type: 'text', required: true },
     { name: 'receipt_date', label: 'Receipt Date', type: 'date', required: true },
-    { name: 'shopkeeper_list', label: 'Shopkeeper List (comma separated)', type: 'textarea', required: false }
+    { name: 'shopkeeper_id', label: 'shopkeeper_id', type: 'text', required: true }
   ],
   SHOPKEEPER: [
     { name: 'shopkeeper_id', label: 'Shopkeeper ID', type: 'text', required: true },
     { name: 'packet_id', label: 'Packet ID', type: 'text', required: true },
     { name: 'gps_coordinates', label: 'GPS Coordinates', type: 'text', required: true },
-    { name: 'date_received', label: 'Date Received', type: 'date', required: true },
-    { name: 'shelf_life_expiry', label: 'Shelf Life Expiry', type: 'date', required: true }
+    { name: 'date_received', label: 'Date Received', type: 'date', required: true }
   ]
 };
