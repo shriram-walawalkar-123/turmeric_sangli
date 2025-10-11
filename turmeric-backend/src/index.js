@@ -1,9 +1,15 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const harvestRoutes = require("./route"); // ✅ make sure this file exists and exports a router
+const harvestRoutes = require("./route");
+const authRoutes = require("./routes/auth");
+const stageAuthRoutes = require("./routes/stageAuth");
+const connectDB = require("./config/database");
 
 const app = express();
+
+// Connect to MongoDB
+connectDB();
 
 // ✅ Middlewares
 app.use(cors());
@@ -11,6 +17,8 @@ app.use(express.json()); // replaces bodyParser.json()
 
 // ✅ Mount routes
 app.use("/api", harvestRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/stage", stageAuthRoutes);
 
 // ✅ Test route
 app.get("/", (req, res) => {
