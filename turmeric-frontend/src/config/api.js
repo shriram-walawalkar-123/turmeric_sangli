@@ -12,6 +12,28 @@ const apiClient = axios.create({
   timeout: 10000,
 });
 
+apiClient.interceptors.request.use((config) => {
+  const stageToken = localStorage.getItem('stageToken');
+  if (stageToken) {
+    config.headers = config.headers || {};
+    config.headers['Authorization'] = `Bearer ${stageToken}`;
+  }
+  return config;
+}, (error) => Promise.reject(error));
+
+// Normalize backend error shape for consumers
+apiClient.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    const backendMsg = err?.response?.data?.error || err?.response?.data?.message;
+    if (backendMsg) {
+      err.message = backendMsg;
+    }
+    return Promise.reject(err);
+  }
+);
+
+
 // API endpoints
 export const API = {
   // Harvest endpoints

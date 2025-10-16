@@ -26,24 +26,33 @@ const StageLogin = ({ onLogin, onBack, isLoading, showBackButton = true }) => {
     setError('');
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  setError('');
 
-    if (!formData.username || !formData.password) {
-      setError('Please fill in all fields');
-      return;
-    }
+  if (!formData.username || !formData.password) {
+    setError('Please fill in all fields');
+    return;
+  }
 
-    try {
-      await onLogin({
-        ...formData,
-        stage: selectedStage.id
-      });
-    } catch (err) {
-      setError(err.message || 'Login failed');
-    }
-  };
+  try {
+    // 🔑 Call the backend login endpoint (through onLogin)
+    const res = await onLogin({
+      ...formData,
+      stage: selectedStage.id,
+    });
+
+   // StageLogin handleSubmit
+if (res?.token) {
+  localStorage.setItem("stageToken", res.token); // use the same key your interceptor reads
+}
+
+
+  } catch (err) {
+    setError(err.message || 'Login failed');
+  }
+};
+
 
   const handleStageSelect = (stage) => {
     setSelectedStage(stage);

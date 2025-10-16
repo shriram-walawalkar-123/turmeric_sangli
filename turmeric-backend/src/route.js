@@ -43,12 +43,16 @@ router.post("/harvest", stageGuard('farmer'), async (req, res) => {
 
 // Processing
 router.post("/processing", stageGuard('processing'), async (req, res) => {
+  console.log("Processing data received ok shriram: ",req.body);
   try {
     requireFields(req.body, [
       'batch_id', 'processing_gps', 'grinding_facility_name', 'moisture_content', 'curcumin_content',
       'heavy_metals', 'physical_properties', 'packaging_date', 'packaging_unit', 'packet_id', 'expiry_date',
       'sending_box_code', 'distributor_id'
     ]);
+
+    console.log("Processing data received ok shriram: ",req.body);
+
     const tx = await addProcessing(req.body);
     const receipt = await tx.wait();
     res.status(200).json({ message: "Processing recorded on-chain", txHash: receipt.hash });
@@ -114,11 +118,12 @@ router.post("/packet", stageGuard('processing'), async (req, res) => {
 // ---------------- GET JOURNEY ---------------- //
 router.get("/journey/:packetId", async (req, res) => {
   try {
+    console.log("check packet params :",req.params.packetId);
     const packetId = req.params.packetId;
     const packetRaw = await getPacket(packetId);
 
-    console.log("RAW PACKET DATA:", packetRaw); // <--- Log this!
-    console.log("PACKET EXISTS CHECK:", packetRaw.exists); // <--- Log this!
+    // console.log("RAW PACKET DATA:", packetRaw); // <--- Log this!
+    // console.log("PACKET EXISTS CHECK:", packetRaw.exists); // <--- Log this!
     const distributorRaw = await getDistributor(packetId);
     const supplierRaw = await getSupplier(packetId);
     const shopkeeperRaw = await getShopkeeper(packetId);

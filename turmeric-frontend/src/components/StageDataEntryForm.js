@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useStageAuth } from '../context/StageAuthContext';
 import { API } from '../config/api';
-import { Save, CheckCircle, AlertCircle, ArrowLeft } from 'lucide-react';
+import { Save, CheckCircle, AlertCircle, ArrowLeft, MapPin, RefreshCw } from 'lucide-react';
 
 const StageDataEntryForm = ({ onBack }) => {
   const { stageUser } = useStageAuth();
@@ -49,6 +49,7 @@ const StageDataEntryForm = ({ onBack }) => {
         title: 'Distributor Data Entry',
         description: 'Record distribution and logistics information',
         fields: [
+          { name: 'packet_id', label: 'Packet ID', type: 'text', required: true },
           { name: 'distributor_id', label: 'Distributor ID', type: 'text', required: true },
           { name: 'gps_coordinates', label: 'GPS Coordinates', type: 'text', required: true, placeholder: 'lat, lng' },
           { name: 'received_box_code', label: 'Received Box Code', type: 'text', required: true },
@@ -88,6 +89,52 @@ const StageDataEntryForm = ({ onBack }) => {
 
   const stageConfig = getStageFormConfig(stageUser?.stage);
   const [formData, setFormData] = useState({});
+  const [geoStatus, setGeoStatus] = useState({ fetching: false, error: '' });
+
+  const gpsFieldNames = useMemo(
+    () => stageConfig.fields.filter(f => f.name.includes('gps')).map(f => f.name),
+    [stageConfig]
+  );
+
+  const formatCoords = (coords) => `${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}`;
+
+  const fetchLocation = async () => {
+    if (!('geolocation' in navigator)) {
+      setGeoStatus({ fetching: false, error: 'Geolocation not supported' });
+      return;
+    }
+    setGeoStatus({ fetching: true, error: '' });
+    try {
+      const position = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        });
+      });
+
+      const value = formatCoords(position.coords);
+      setFormData((prev) => {
+        const next = { ...prev };
+        gpsFieldNames.forEach((name) => {
+          next[name] = value;
+        });
+        return next;
+      });
+      setGeoStatus({ fetching: false, error: '' });
+    } catch (err) {
+      const message = err?.message || 'Unable to fetch location';
+      setGeoStatus({ fetching: false, error: message });
+    }
+  };
+
+  // Auto-fetch GPS on mount when relevant fields exist
+  useEffect(() => {
+    if (gpsFieldNames.length > 0) {
+      fetchLocation();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stageConfig.title]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -104,11 +151,11 @@ const StageDataEntryForm = ({ onBack }) => {
     setSuccess('');
 
     try {
-      await API[stageConfig.submitEndpoint](formData);
+      const data = await API[stageConfig.submitEndpoint](formData);
       setSuccess('Data submitted successfully!');
       setFormData({});
     } catch (error) {
-      setError(error.response?.data?.message || 'Failed to submit data');
+      setError(error?.message || error?.response?.data?.message || 'Failed to submit data');
     } finally {
       setLoading(false);
     }
@@ -191,19 +238,44 @@ const StageDataEntryForm = ({ onBack }) => {
                     ))}
                   </select>
                 ) : (
-                  <input
-                    type={field.type}
-                    name={field.name}
-                    value={formData[field.name] || ''}
-                    onChange={handleInputChange}
-                    placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
-                    className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-${stageColor}-500 focus:border-transparent transition-all duration-200`}
-                    required={field.required}
-                  />
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type={field.type}
+                      name={field.name}
+                      value={formData[field.name] || ''}
+                      onChange={handleInputChange}
+                      placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
+                      className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-${stageColor}-500 focus:border-transparent transition-all duration-200 ${field.name.includes('gps') ? 'bg-gray-50' : ''}`}
+                      required={field.required}
+                      readOnly={field.name.includes('gps')}
+                    />
+                    {field.name.includes('gps') && (
+                      <button
+                        type="button"
+                        onClick={fetchLocation}
+                        title="Use current location"
+                        className={`shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 focus:ring-2 focus:ring-${stageColor}-500`}
+                        disabled={geoStatus.fetching}
+                      >
+                        {geoStatus.fetching ? (
+                          <RefreshCw className="animate-spin" size={16} />
+                        ) : (
+                          <MapPin size={16} />
+                        )}
+                        <span className="hidden md:inline">{geoStatus.fetching ? 'Locating...' : 'Use GPS'}</span>
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             ))}
           </div>
+
+          {gpsFieldNames.length > 0 && geoStatus.error && (
+            <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg mt-2">
+              {geoStatus.error}. Please allow location access or click "Use GPS" to retry.
+            </div>
+          )}
 
           <div className="flex justify-end pt-6">
             <button
