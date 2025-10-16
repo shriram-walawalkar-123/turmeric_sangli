@@ -1,256 +1,196 @@
 const express = require("express");
 const router = express.Router();
+const {
+  addHarvest,
+  addProcessing,
+  addDistributor,
+  addSupplier,
+  addShopkeeper,
+  addPacket,
+  getPacket,
+  getHarvest,
+  getProcessing,
+  getDistributor,
+  getSupplier,
+  getShopkeeper,
+} = require('./services/contractService');
+const { stageGuard } = require('./middleware/stageRole');
 
-// In-memory storage (temporary, resets on server restart)
-const harvests = [];
-const processings = [];
-const distributors = [];
-const suppliers = [];
-const shopkeepers = [];
-const packets = [];
-const activities = [];
-
-function addActivity(type, data) {
-  const entry = { type, timestamp: new Date().toISOString(), data };
-  activities.push(entry);
-  if (activities.length > 200) 
-  activities.shift();
+function requireFields(obj, fields) {
+  const missing = fields.filter((f) => obj[f] === undefined || obj[f] === null || obj[f] === "");
+  if (missing.length) {
+    const err = new Error(`Missing required fields: ${missing.join(', ')}`);
+    err.status = 400;
+    throw err;
+  }
 }
 
+// ---------------- POST ROUTES ---------------- //
+
 // Harvest
-router.post("/harvest", async (req, res) => {
-  console.log("Received harvest data:", req.body);
+router.post("/harvest", stageGuard('farmer'), async (req, res) => {
   try {
-    const { batch_id, farmer_id, product_name, harvest_date, gps_coordinates, fertilizer, organic_status } = req.body;
-
-    const harvestStruct = {
-      farmer_id,
-      product_name,
-      batch_id,
-      harvest_date,
-      gps_coordinates,
-      fertilizer,
-      organic_status
-    };
-
-    harvests.push(harvestStruct);
-    addActivity("harvest", harvestStruct);
-
-    return res.status(200).json({
-      message: "Harvest data received successfully",
-      data: harvestStruct
-    });
+    requireFields(req.body, [
+      'batch_id', 'farmer_id', 'product_name', 'harvest_date', 'gps_coordinates', 'fertilizer', 'organic_status'
+    ]);
+    const tx = await addHarvest(req.body);
+    const receipt = await tx.wait();
+    res.status(200).json({ message: "Harvest recorded on-chain", txHash: receipt.hash });
   } catch (error) {
-    return res.status(500).json({ error: error.message || String(error) });
+    res.status(error.status || 500).json({ error: error.message || String(error) });
   }
 });
 
-// Processing & Packaging
-router.post("/processing", async (req, res) => {
-  console.log("Received processing data:", req.body);
+// Processing
+router.post("/processing", stageGuard('processing'), async (req, res) => {
   try {
-    const {
-      batch_id,
-      processing_gps,
-      grinding_facility_name,
-      moisture_content,
-      curcumin_content,
-      heavy_metals,
-      physical_properties,
-      packaging_date,
-      packaging_unit,
-      packet_id,
-      expiry_date,
-      sending_box_code,
-      distributor_id
-    } = req.body;
-
-    const processingStruct = {
-      batch_id,
-      processing_gps,
-      grinding_facility_name,
-      moisture_content: moisture_content !== undefined ? Number(moisture_content) : undefined,
-      curcumin_content: curcumin_content !== undefined ? Number(curcumin_content) : undefined,
-      heavy_metals,
-      physical_properties,
-      packaging_date,
-      packaging_unit,
-      packet_id,
-      expiry_date,
-      sending_box_code,
-      distributor_id
-    };
-
-    processings.push(processingStruct);
-    addActivity("processing", processingStruct);
-
-    return res.status(200).json({
-      message: "Processing data received successfully",
-      data: processingStruct
-    });
+    requireFields(req.body, [
+      'batch_id', 'processing_gps', 'grinding_facility_name', 'moisture_content', 'curcumin_content',
+      'heavy_metals', 'physical_properties', 'packaging_date', 'packaging_unit', 'packet_id', 'expiry_date',
+      'sending_box_code', 'distributor_id'
+    ]);
+    const tx = await addProcessing(req.body);
+    const receipt = await tx.wait();
+    res.status(200).json({ message: "Processing recorded on-chain", txHash: receipt.hash });
   } catch (error) {
-    return res.status(500).json({ error: error.message || String(error) });
+    res.status(error.status || 500).json({ error: error.message || String(error) });
   }
 });
 
 // Distributor
-router.post("/distributor", async (req, res) => {
-  console.log("Received distributor data:", req.body);
+router.post("/distributor", stageGuard('distributor'), async (req, res) => {
   try {
-    const { distributor_id, gps_coordinates, received_box_code, dispatch_date, sending_box_code, supplier_id} = req.body;
-
-    const distributorStruct = {
-      distributor_id,
-      gps_coordinates,
-      received_box_code,
-      dispatch_date,
-      sending_box_code,
-      supplier_id
-    };
-
-    distributors.push(distributorStruct);
-    addActivity("distributor", distributorStruct);
-
-    return res.status(200).json({
-      message: "Distributor data received successfully",
-      data: distributorStruct
-    });
+    requireFields(req.body, [
+      'packet_id', 'distributor_id', 'gps_coordinates', 'received_box_code', 'dispatch_date', 'sending_box_code', 'supplier_id'
+    ]);
+    const tx = await addDistributor(req.body);
+    const receipt = await tx.wait();
+    res.status(200).json({ message: "Distributor recorded on-chain", txHash: receipt.hash });
   } catch (error) {
-    return res.status(500).json({ error: error.message || String(error) });
+    res.status(error.status || 500).json({ error: error.message || String(error) });
   }
 });
 
 // Supplier
-router.post("/supplier", async (req, res) => {
-  console.log("Received supplier data:", req.body);
+router.post("/supplier", stageGuard('supplier'), async (req, res) => {
   try {
-    const {supplier_id, received_box_code, gps_coordinates, receipt_date, shopkeeper_id, packet_id } = req.body;
-
-    const supplierStruct = {
-      supplier_id,
-      received_box_code,
-      gps_coordinates,
-      receipt_date,
-      shopkeeper_id,
-      packet_id
-    };
-
-    suppliers.push(supplierStruct);
-    addActivity("supplier", supplierStruct);
-
-    return res.status(200).json({
-      message: "Supplier data received successfully",
-      data: supplierStruct
-    });
+    requireFields(req.body, [
+      'packet_id', 'supplier_id', 'received_box_code', 'gps_coordinates', 'receipt_date', 'shopkeeper_id'
+    ]);
+    const tx = await addSupplier(req.body);
+    const receipt = await tx.wait();
+    res.status(200).json({ message: "Supplier recorded on-chain", txHash: receipt.hash });
   } catch (error) {
-    return res.status(500).json({ error: error.message || String(error) });
+    res.status(error.status || 500).json({ error: error.message || String(error) });
   }
 });
 
 // Shopkeeper
-router.post("/shopkeeper", async (req, res) => {
-  console.log("Received shopkeeper data:", req.body);
+router.post("/shopkeeper", stageGuard('shopkeeper'), async (req, res) => {
   try {
-    const {shopkeeper_id, packet_id, gps_coordinates, date_received } = req.body;
-
-    const shopkeeperStruct = {
-      shopkeeper_id,
-      packet_id,
-      gps_coordinates,
-      date_received
-    };
-
-    shopkeepers.push(shopkeeperStruct);
-    addActivity("shopkeeper", shopkeeperStruct);
-
-    return res.status(200).json({
-      message: "Shopkeeper data received successfully",
-      data: shopkeeperStruct
-    });
+    requireFields(req.body, [
+      'packet_id', 'shopkeeper_id', 'gps_coordinates', 'date_received'
+    ]);
+    const tx = await addShopkeeper(req.body);
+    const receipt = await tx.wait();
+    res.status(200).json({ message: "Shopkeeper recorded on-chain", txHash: receipt.hash });
   } catch (error) {
-    return res.status(500).json({ error: error.message || String(error) });
+    res.status(error.status || 500).json({ error: error.message || String(error) });
   }
 });
 
 // Packet
-router.post("/packet", async (req, res) => {
-  console.log("Received packet data:", req.body);
+router.post("/packet", stageGuard('processing'), async (req, res) => {
   try {
-    const { unique_packet_id, batch_id, current_stage } = req.body;
-
-    const packetStruct = {
-      unique_packet_id,
-      batch_id,
-      current_stage,
-    };
-
-    packets.push(packetStruct);
-    addActivity("packet", packetStruct);
-
-    return res.status(200).json({
-      message: "Packet data received successfully",
-      data: packetStruct
-    });
+    requireFields(req.body, ['unique_packet_id', 'batch_id', 'current_stage']);
+    const tx = await addPacket(req.body);
+    const receipt = await tx.wait();
+    res.status(200).json({ message: "Packet recorded on-chain", txHash: receipt.hash });
   } catch (error) {
-    return res.status(500).json({ error: error.message || String(error) });
+    res.status(error.status || 500).json({ error: error.message || String(error) });
   }
 });
 
-// Journey placeholder: aggregate by packetId
+// ---------------- GET JOURNEY ---------------- //
 router.get("/journey/:packetId", async (req, res) => {
-  console.log("Fetching journey for packetId:", req.params.packetId);
   try {
     const packetId = req.params.packetId;
+    const packetRaw = await getPacket(packetId);
 
-    const byPacketId = (item) => (
-      item.packet_id === packetId ||
-      item.unique_packet_id === packetId ||
-      item.batch_id === packetId
-    );
+    console.log("RAW PACKET DATA:", packetRaw); // <--- Log this!
+    console.log("PACKET EXISTS CHECK:", packetRaw.exists); // <--- Log this!
+    const distributorRaw = await getDistributor(packetId);
+    const supplierRaw = await getSupplier(packetId);
+    const shopkeeperRaw = await getShopkeeper(packetId);
 
-    const result = {
-      packet: packets.filter(byPacketId),
-      harvest: harvests.filter(byPacketId),
-      processing: processings.filter(byPacketId),
-      distributor: distributors.filter(byPacketId),
-      supplier: suppliers.filter(byPacketId),
-      shopkeeper: shopkeepers.filter(byPacketId),
-    };
+    // Convert ethers struct to plain object safely
+    const packet = packetRaw.exists ? {
+      unique_packet_id: packetRaw.unique_packet_id,
+      batch_id: packetRaw.batch_id,
+      current_stage: packetRaw.current_stage,
+      exists: packetRaw.exists
+    } : null;
 
-    return res.status(200).json(result);
+    const batchId = packet?.batch_id;
+
+    const harvestRaw = batchId ? await getHarvest(batchId) : null;
+    const processingRaw = batchId ? await getProcessing(batchId) : null;
+
+    const harvest = harvestRaw?.batch_id ? {
+      farmer_id: harvestRaw.farmer_id,
+      product_name: harvestRaw.product_name,
+      batch_id: harvestRaw.batch_id,
+      harvest_date: harvestRaw.harvest_date,
+      gps_coordinates: harvestRaw.gps_coordinates,
+      fertilizer: harvestRaw.fertilizer,
+      organic_status: harvestRaw.organic_status
+    } : null;
+
+    const processing = processingRaw?.batch_id ? {
+      batch_id: processingRaw.batch_id,
+      processing_gps: processingRaw.processing_gps,
+      grinding_facility_name: processingRaw.grinding_facility_name,
+      moisture_content: processingRaw.moisture_content.toString(),
+      curcumin_content: processingRaw.curcumin_content.toString(),
+      heavy_metals: processingRaw.heavy_metals,
+      physical_properties: processingRaw.physical_properties,
+      packaging_date: processingRaw.packaging_date,
+      packaging_unit: processingRaw.packaging_unit,
+      packet_id: processingRaw.packet_id,
+      expiry_date: processingRaw.expiry_date,
+      sending_box_code: processingRaw.sending_box_code,
+      distributor_id: processingRaw.distributor_id
+    } : null;
+
+    const distributor = distributorRaw?.distributor_id ? {
+      distributor_id: distributorRaw.distributor_id,
+      gps_coordinates: distributorRaw.gps_coordinates,
+      received_box_code: distributorRaw.received_box_code,
+      dispatch_date: distributorRaw.dispatch_date,
+      sending_box_code: distributorRaw.sending_box_code,
+      supplier_id: distributorRaw.supplier_id
+    } : null;
+
+    const supplier = supplierRaw?.supplier_id ? {
+      supplier_id: supplierRaw.supplier_id,
+      received_box_code: supplierRaw.received_box_code,
+      gps_coordinates: supplierRaw.gps_coordinates,
+      receipt_date: supplierRaw.receipt_date,
+      shopkeeper_id: supplierRaw.shopkeeper_id,
+      packet_id: supplierRaw.packet_id
+    } : null;
+
+    const shopkeeper = shopkeeperRaw?.shopkeeper_id ? {
+      shopkeeper_id: shopkeeperRaw.shopkeeper_id,
+      packet_id: shopkeeperRaw.packet_id,
+      gps_coordinates: shopkeeperRaw.gps_coordinates,
+      date_received: shopkeeperRaw.date_received
+    } : null;
+
+    res.status(200).json({ packet, harvest, processing, distributor, supplier, shopkeeper });
+
   } catch (error) {
-    return res.status(500).json({ error: error.message || String(error) });
-  }
-});
-
-// Stats placeholder
-router.get("/stats", async (_req, res) => {
-  console.log("Fetching stats");
-  try {
-    return res.status(200).json({
-      totalPackets: packets.length,
-      totalBatches: new Set([...harvests, ...processings, ...packets].map(i => i.batch_id).filter(Boolean)).size,
-      roles: {
-        farmers: new Set(harvests.map(h => h.RnR_farmer_id).filter(Boolean)).size,
-        processors: new Set(processings.map(p => p.grinding_facility_name).filter(Boolean)).size,
-        distributors: new Set(distributors.map(d => d.distributor_id).filter(Boolean)).size,
-        suppliers: new Set(suppliers.map(s => s.supplier_id).filter(Boolean)).size,
-        shopkeepers: new Set(shopkeepers.map(s => s.shopkeeper_id).filter(Boolean)).size,
-      },
-    });
-  } catch (error) {
-    return res.status(500).json({ error: error.message || String(error) });
-  }
-});
-
-// Activity placeholder
-router.get("/activity", async (_req, res) => {
-  console.log("Fetching recent activity");
-  try {
-    const last = activities.slice(-50).reverse();
-    return res.status(200).json(last);
-  } catch (error) {
-    return res.status(500).json({ error: error.message || String(error) });
+    res.status(500).json({ error: error.message || String(error) });
   }
 });
 

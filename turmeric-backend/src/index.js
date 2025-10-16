@@ -4,6 +4,7 @@ const cors = require("cors");
 const harvestRoutes = require("./route");
 const authRoutes = require("./routes/auth");
 const stageAuthRoutes = require("./routes/stageAuth");
+const roleRoutes = require("./routes/roles");
 const connectDB = require("./config/database");
 
 const app = express();
@@ -14,11 +15,14 @@ connectDB();
 // ✅ Middlewares
 app.use(cors());
 app.use(express.json()); // replaces bodyParser.json()
+// Increase body limit for on-chain payloads if needed
+app.use(express.json({ limit: '1mb' }));
 
 // ✅ Mount routes
 app.use("/api", harvestRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/stage", stageAuthRoutes);
+app.use("/api/roles", roleRoutes);
 
 // ✅ Test route
 app.get("/", (req, res) => {
