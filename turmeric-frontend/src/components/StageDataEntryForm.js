@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useStageAuth } from '../context/StageAuthContext';
 import { API } from '../config/api';
 import { Save, CheckCircle, AlertCircle, ArrowLeft, MapPin, RefreshCw } from 'lucide-react';
+import QRCode from 'qrcode';
 
 const StageDataEntryForm = ({ onBack }) => {
   const { stageUser } = useStageAuth();
@@ -90,6 +91,8 @@ const StageDataEntryForm = ({ onBack }) => {
   const stageConfig = getStageFormConfig(stageUser?.stage);
   const [formData, setFormData] = useState({});
   const [geoStatus, setGeoStatus] = useState({ fetching: false, error: '' });
+  const [qrDataUrl, setQrDataUrl] = useState('');
+  const qrCanvasRef = useRef(null);
 
   const gpsFieldNames = useMemo(
     () => stageConfig.fields.filter(f => f.name.includes('gps')).map(f => f.name),
@@ -153,6 +156,21 @@ const StageDataEntryForm = ({ onBack }) => {
     try {
       const data = await API[stageConfig.submitEndpoint](formData);
       setSuccess('Data submitted successfully!');
+      // Generate QR only for processing stage using packet_id (or packetId field name)
+      if (stageUser?.stage === 'processing') {
+        const packetId = formData.packet_id || formData.packetId || formData.packet_id || formData['packet_id'];
+        if (packetId) {
+          const origin = window.location.origin;
+          // Point to public tracking route
+          const trackingUrl = `${origin}/tracking?packetId=${encodeURIComponent(packetId)}`;
+          try {
+            const url = await QRCode.toDataURL(trackingUrl, { width: 512, margin: 2 });
+            setQrDataUrl(url);
+          } catch (qrErr) {
+            console.error('QR generation failed', qrErr);
+          }
+        }
+      }
       setFormData({});
     } catch (error) {
       setError(error?.message || error?.response?.data?.message || 'Failed to submit data');
@@ -297,6 +315,39 @@ const StageDataEntryForm = ({ onBack }) => {
             </button>
           </div>
         </form>
+        {/* QR Output - only shows after processing submit with packetId */}
+        {qrDataUrl && stageUser?.stage === 'processing' && (
+          <div className="mt-8 border border-gray-200 rounded-xl p-6 bg-gray-50">
+            <h3 className="text-xl font-bold text-gray-800 mb-2">Packet Tracking QR</h3>
+            <p className="text-gray-600 mb-4">Scan to open tracking page for this packet.</p>
+            <div className="flex flex-col md:flex-row items-center gap-6">
+              <img src={qrDataUrl} alt="Tracking QR" className="w-56 h-56 border bg-white p-2 rounded-lg" />
+              <div className="flex flex-col gap-2 w-full md:w-auto">
+                <a
+                  href={qrDataUrl}
+                  download={`packet-tracking-qr.png`}
+                  className="inline-block text-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  Download QR PNG
+                </a>
+                <button
+                  onClick={() => {
+                    const w = window.open('');
+                    if (!w) return;
+                    w.document.write(`<img src="${qrDataUrl}" style="width:320px;height:320px;" />`);
+                    w.document.close();
+                    w.focus();
+                    w.print();
+                  }}
+                  className="inline-block text-center px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900"
+                >
+                  Print QR
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mt-3">Embed this QR on the packet. It encodes the public tracking URL.</p>
+          </div>
+        )}
       </div>
     </div>
   );

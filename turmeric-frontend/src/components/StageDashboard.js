@@ -118,20 +118,6 @@ const StageDashboard = () => {
               <Plus size={20} />
               Add New Data Entry
             </button>
-            <button 
-              onClick={() => setActiveView('recent')}
-              className={`bg-white border-2 border-${stageInfo.color}-300 text-${stageInfo.color}-700 py-3 px-6 rounded-lg font-medium hover:bg-${stageInfo.color}-50 transition-all duration-200 flex items-center gap-2`}
-            >
-              <Eye size={20} />
-              View Recent Entries
-            </button>
-            <button 
-              onClick={() => setActiveView('tracking')}
-              className={`bg-white border-2 border-${stageInfo.color}-300 text-${stageInfo.color}-700 py-3 px-6 rounded-lg font-medium hover:bg-${stageInfo.color}-50 transition-all duration-200 flex items-center gap-2`}
-            >
-              <BarChart3 size={20} />
-              Track Products
-            </button>
           </div>
         </div>
 

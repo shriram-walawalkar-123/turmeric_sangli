@@ -83,22 +83,32 @@ const TrackingPage = () => {
     'Data Verified'
   ];
 
-  useEffect(() => {
-    if (loading) {
-      setVerificationSteps([]);
-      setCurrentStep(-1);
-      const interval = setInterval(() => {
-        setCurrentStep(prev => {
-          if (prev < verificationSequence.length - 1) {
-            setVerificationSteps(prevSteps => [...prevSteps, verificationSequence[prev + 1]]);
-            return prev + 1;
-          }
-          return prev;
-        });
-      }, 400);
-      return () => clearInterval(interval);
+
+// 1. Read packetId from URL on mount
+useEffect(() => {
+  const fromSearch = new URLSearchParams(window.location.search).get('packetId');
+  let fromHash = '';
+  if (!fromSearch && window.location.hash) {
+    const hash = window.location.hash.replace(/^#/, '');
+    const qIndex = hash.indexOf('?');
+    if (qIndex !== -1) {
+      const query = hash.slice(qIndex + 1);
+      fromHash = new URLSearchParams(query).get('packetId') || '';
     }
-  }, [loading]);
+  }
+  const initial = fromSearch || fromHash || '';
+  if (initial) {
+    setPacketId(initial);
+  }
+}, []);
+
+// 2. Whenever packetId comes from URL, auto-track it
+useEffect(() => {
+  if (packetId) {
+    handleTrack();
+  }
+}, [packetId]);
+
 
   const handleTrack = async () => {
     if (!packetId.trim()) {
@@ -125,6 +135,32 @@ const TrackingPage = () => {
       setTimeout(() => setLoading(false), 2800);
     }
   };
+
+  // Read packetId from URL (?packetId=...) or hash (#/track?packetId=...)
+  useEffect(() => {
+    try {
+      const fromSearch = new URLSearchParams(window.location.search).get('packetId');
+      let fromHash = '';
+      if (!fromSearch && window.location.hash) {
+        const hash = window.location.hash.replace(/^#/, '');
+        const qIndex = hash.indexOf('?');
+        if (qIndex !== -1) {
+          const query = hash.slice(qIndex + 1);
+          fromHash = new URLSearchParams(query).get('packetId') || '';
+        }
+      }
+      const initial = fromSearch || fromHash || '';
+      if (initial) {
+        setPacketId(initial);
+        // Defer to allow state update before tracking
+        setTimeout(() => {
+          handleTrack();
+        }, 0);
+      }
+    } catch (_) {
+      // ignore URL parsing errors
+    }
+  }, []);
 
   const mapLink = (value) => {
     if (!value) return null;
