@@ -13,6 +13,13 @@ const {
   getDistributor,
   getSupplier,
   getShopkeeper,
+  getBatchPacketCount,
+  batchExists,
+  packetIdExists,
+  getAllFarmersAndBatches,
+  getBatchesForFarmer,
+  getAllFarmers,
+  getHarvestForBatch,
 } = require('./services/contractService');
 const { stageGuard } = require('./middleware/stageRole');
 
@@ -33,10 +40,14 @@ router.post("/harvest", stageGuard('farmer'), async (req, res) => {
     requireFields(req.body, [
       'batch_id', 'farmer_id', 'product_name', 'harvest_date', 'gps_coordinates', 'fertilizer', 'organic_status'
     ]);
+    
+    // The smart contract will validate batch uniqueness per farmer
+    // If batch already exists, contract will revert with error message
     const tx = await addHarvest(req.body);
     const receipt = await tx.wait();
     res.status(200).json({ message: "Harvest recorded on-chain", txHash: receipt.hash });
   } catch (error) {
+    // Contract validation error will be caught here
     res.status(error.status || 500).json({ error: error.message || String(error) });
   }
 });
@@ -51,13 +62,27 @@ router.post("/processing", stageGuard('processing'), async (req, res) => {
       'sending_box_code', 'distributor_id'
     ]);
 
+    // Check if packet already exists (uses updated ABI)
+    const packetExistsCheck = await packetIdExists(req.body.packet_id);
+    if (packetExistsCheck) {
+      return res.status(400).json({ error: "Packet ID already exists. Each packet must be unique." });
+    }
+
+    // Verify batch exists
+    const batchExistsCheck = await batchExists(req.body.batch_id);
+    if (!batchExistsCheck) {
+      return res.status(400).json({ error: "Batch ID does not exist. Harvest must be registered first." });
+    }
+
     console.log("Processing data received ok shriram: ",req.body);
 
     const tx = await addProcessing(req.body);
     const receipt = await tx.wait();
     res.status(200).json({ message: "Processing recorded on-chain", txHash: receipt.hash });
   } catch (error) {
-    res.status(error.status || 500).json({ error: error.message || String(error) });
+    // Surface contract revert messages nicely
+    const msg = error?.error?.message || error?.reason || error?.message || String(error);
+    res.status(error.status || 500).json({ error: msg });
   }
 });
 
@@ -194,6 +219,81 @@ router.get("/journey/:packetId", async (req, res) => {
 
     res.status(200).json({ packet, harvest, processing, distributor, supplier, shopkeeper });
 
+  } catch (error) {
+    res.status(500).json({ error: error.message || String(error) });
+  }
+});
+
+// ---------------- NEW ENDPOINTS FOR PROCESSING FORM ----------------
+// Get all farmers
+router.get("/farmers", async (req, res) => {
+  try {
+    const farmers = await getAllFarmers();
+    console.log("farmer list from backend is :",farmers)
+    res.status(200).json({ farmers });
+  } catch (error) {
+    res.status(500).json({ error: error.message || String(error) });
+  }
+});
+
+// Get batches for a farmer
+router.get("/farmers/:farmerId/batches", async (req, res) => {
+  try {
+    const { farmerId } = req.params;
+    const batches = await getBatchesForFarmer(farmerId);
+    
+    // Get packet count for each batch
+    const batchesWithCount = await Promise.all(
+      batches.map(async (batchId) => {
+        try {
+          const count = await getBatchPacketCount(batchId);
+          const harvest = await getHarvestForBatch(batchId);
+          return {
+            batchId,
+            packetCount: count.toString(),
+            harvestDate: harvest.harvest_date || '',
+            productName: harvest.product_name || ''
+          };
+        } catch (err) {
+          return {
+            batchId,
+            packetCount: '0',
+            harvestDate: '',
+            productName: ''
+          };
+        }
+      })
+    );
+    
+    res.status(200).json({ batches: batchesWithCount });
+  } catch (error) {
+    res.status(500).json({ error: error.message || String(error) });
+  }
+});
+
+// Get packet count for a batch
+router.get("/batches/:batchId/packet-count", async (req, res) => {
+  try {
+    const { batchId } = req.params;
+    const count = await getBatchPacketCount(batchId);
+    const exists = await batchExists(batchId);
+    
+    res.status(200).json({ 
+      batchId,
+      packetCount: count.toString(),
+      exists
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || String(error) });
+  }
+});
+
+// Check if packet ID exists
+router.get("/packets/:packetId/exists", async (req, res) => {
+  try {
+    const { packetId } = req.params;
+    const exists = await packetIdExists(packetId);
+    res.status(200).json({ packetId, exists });
   } catch (error) {
     res.status(500).json({ error: error.message || String(error) });
   }

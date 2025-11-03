@@ -9,6 +9,15 @@ const StageDataEntryForm = ({ onBack }) => {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
+  
+  // Processing stage specific state
+  const [farmers, setFarmers] = useState([]);
+  const [selectedFarmer, setSelectedFarmer] = useState('');
+  const [batches, setBatches] = useState([]);
+  const [selectedBatch, setSelectedBatch] = useState('');
+  const [batchPacketCount, setBatchPacketCount] = useState(null);
+  const [loadingFarmers, setLoadingFarmers] = useState(false);
+  const [loadingBatches, setLoadingBatches] = useState(false);
 
   const getStageFormConfig = (stage) => {
     const configs = {
@@ -30,7 +39,7 @@ const StageDataEntryForm = ({ onBack }) => {
         title: 'Processing Data Entry',
         description: 'Record processing and packaging information',
         fields: [
-          { name: 'batch_id', label: 'Batch ID', type: 'text', required: true },
+          // batch_id will be handled separately with dropdowns
           { name: 'processing_gps', label: 'Processing GPS', type: 'text', required: true, placeholder: 'lat, lng' },
           { name: 'grinding_facility_name', label: 'Grinding Facility Name', type: 'text', required: true },
           { name: 'moisture_content', label: 'Moisture Content (%)', type: 'number', required: true },
@@ -139,12 +148,106 @@ const StageDataEntryForm = ({ onBack }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stageConfig.title]);
 
+  // Fetch farmers for processing stage
+  useEffect(() => {
+    if (stageUser?.stage === 'processing') {
+      fetchFarmers();
+    }
+  }, [stageUser?.stage]);
+
+  // Fetch batches when farmer is selected
+  useEffect(() => {
+    if (stageUser?.stage === 'processing' && selectedFarmer) {
+      fetchBatchesForFarmer(selectedFarmer);
+    } else {
+      setBatches([]);
+      setSelectedBatch('');
+      setBatchPacketCount(null);
+    }
+  }, [selectedFarmer, stageUser?.stage]);
+
+  // Fetch packet count when batch is selected
+  useEffect(() => {
+    if (stageUser?.stage === 'processing' && selectedBatch) {
+      fetchBatchPacketCount(selectedBatch);
+      // Update formData with batch_id
+      setFormData(prev => ({ ...prev, batch_id: selectedBatch }));
+    } else {
+      setBatchPacketCount(null);
+    }
+  }, [selectedBatch, stageUser?.stage]);
+
+  const fetchFarmers = async () => {
+    setLoadingFarmers(true);
+    try {
+      const response = await API.getFarmers();
+      console.log('Fetched farmers:', response);
+      setFarmers(response.data.farmers || []);
+    } catch (err) {
+      setError(`Failed to load farmers: ${err.message}`);
+    } finally {
+      setLoadingFarmers(false);
+    }
+  };
+
+  const fetchBatchesForFarmer = async (farmerId) => {
+    setLoadingBatches(true);
+    try {
+      const response = await API.getBatchesForFarmer(farmerId);
+      setBatches(response.data.batches || []);
+      setSelectedBatch(''); // Reset batch selection
+    } catch (err) {
+      setError(`Failed to load batches: ${err.message}`);
+      setBatches([]);
+    } finally {
+      setLoadingBatches(false);
+    }
+  };
+
+  const fetchBatchPacketCount = async (batchId) => {
+    try {
+      const response = await API.getBatchPacketCount(batchId);
+      setBatchPacketCount({
+        count: parseInt(response.data.packetCount) || 0,
+        exists: response.data.exists
+      });
+    } catch (err) {
+      console.error('Failed to load packet count:', err);
+      setBatchPacketCount({ count: 0, exists: false });
+    }
+  };
+
+  const handleFarmerChange = (e) => {
+    setSelectedFarmer(e.target.value);
+  };
+
+  const handleBatchChange = (e) => {
+    setSelectedBatch(e.target.value);
+  };
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData({
       ...formData,
       [name]: value
     });
+    
+    // Validate packet ID uniqueness when changed (for processing stage)
+    if (stageUser?.stage === 'processing' && name === 'packet_id' && value) {
+      validatePacketId(value);
+    }
+  };
+
+  const validatePacketId = async (packetId) => {
+    try {
+      const response = await API.checkPacketExists(packetId);
+      if (response.data.exists) {
+        setError(`Packet ID "${packetId}" already exists. Each packet must be unique.`);
+      }
+    } catch (err) {
+      // Ignore validation errors, contract will handle it
+      console.error('Packet validation error:', err);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -154,11 +257,22 @@ const StageDataEntryForm = ({ onBack }) => {
     setSuccess('');
 
     try {
-      const data = await API[stageConfig.submitEndpoint](formData);
+      // For processing stage, ensure batch_id is set from selection
+      const submitData = { ...formData };
+      if (stageUser?.stage === 'processing') {
+        if (!selectedBatch) {
+          setError('Please select a batch ID');
+          setLoading(false);
+          return;
+        }
+        submitData.batch_id = selectedBatch;
+      }
+
+      const data = await API[stageConfig.submitEndpoint](submitData);
       setSuccess('Data submitted successfully!');
       // Generate QR only for processing stage using packet_id (or packetId field name)
       if (stageUser?.stage === 'processing') {
-        const packetId = formData.packet_id || formData.packetId || formData.packet_id || formData['packet_id'];
+        const packetId = submitData.packet_id || submitData.packetId || submitData['packet_id'];
         if (packetId) {
           const origin = window.location.origin;
           // Point to public tracking route
@@ -172,6 +286,12 @@ const StageDataEntryForm = ({ onBack }) => {
         }
       }
       setFormData({});
+      // Reset farmer/batch selections for processing stage
+      if (stageUser?.stage === 'processing') {
+        setSelectedFarmer('');
+        setSelectedBatch('');
+        setBatchPacketCount(null);
+      }
     } catch (error) {
       setError(error?.message || error?.response?.data?.message || 'Failed to submit data');
     } finally {
@@ -233,6 +353,80 @@ const StageDataEntryForm = ({ onBack }) => {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Special handling for processing stage: Farmer and Batch dropdowns */}
+            {stageUser?.stage === 'processing' && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Select Farmer <span className="text-red-500 ml-1">*</span>
+                  </label>
+                  <select
+                    value={selectedFarmer}
+                    onChange={handleFarmerChange}
+                    className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-${stageColor}-500 focus:border-transparent transition-all duration-200`}
+                    required
+                    disabled={loadingFarmers}
+                  >
+                    <option value="">{loadingFarmers ? 'Loading farmers...' : 'Select Farmer'}</option>
+                    {farmers.map((farmer) => {
+                      // Ensure farmer is a string (defensive check)
+                      const farmerId = typeof farmer === 'string' ? farmer : String(farmer || '');
+                      return (
+                        <option key={farmerId} value={farmerId}>
+                          {farmerId}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+                
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Select Batch ID <span className="text-red-500 ml-1">*</span>
+                  </label>
+                  <div className="flex gap-2 items-start">
+                    <select
+                      value={selectedBatch}
+                      onChange={handleBatchChange}
+                      className={`flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-${stageColor}-500 focus:border-transparent transition-all duration-200`}
+                      required
+                      disabled={!selectedFarmer || loadingBatches}
+                    >
+                      <option value="">
+                        {!selectedFarmer 
+                          ? '👆 Select farmer first' 
+                          : loadingBatches 
+                          ? 'Loading batches...' 
+                          : batches.length === 0
+                          ? 'No batches found for this farmer'
+                          : 'Select Batch ID'}
+                      </option>
+                      {batches.map((batch) => (
+                        <option key={batch.batchId} value={batch.batchId}>
+                          {batch.batchId} {batch.productName ? `(${batch.productName})` : ''} {batch.harvestDate ? `- ${batch.harvestDate}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {selectedBatch && batchPacketCount !== null && (
+                    <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-blue-900">Packet Information</p>
+                          <p className="text-sm text-blue-700 mt-1">
+                            Total packets created: <span className="font-bold text-blue-900">{batchPacketCount.count}</span>
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-blue-600">Batch Status: {batchPacketCount.exists ? 'Active' : 'Unknown'}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+            
             {stageConfig.fields.map((field) => (
               <div key={field.name} className={field.name.includes('gps') || field.name.includes('properties') ? 'md:col-span-2' : ''}>
                 <label className="block text-sm font-medium text-gray-700 mb-2">

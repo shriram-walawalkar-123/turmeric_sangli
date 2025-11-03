@@ -1,4 +1,5 @@
-const { getContract } = require('../config/blockchain');
+const { getContract, getProvider } = require('../config/blockchain');
+const { ethers } = require('ethers');
 
 // Thin wrapper around the contract calls with consistent error surfaces
 async function addHarvest(data) {
@@ -127,6 +128,159 @@ async function getShopkeeper(packet_id) {
   return c.getShopkeeper(packet_id);
 }
 
+// New getter functions
+async function getBatchPacketCount(batch_id) {
+  const c = getContract();
+  return c.getBatchPacketCount(batch_id);
+}
+
+async function batchExists(batch_id) {
+  const c = getContract();
+  return c.batchExists(batch_id);
+}
+
+async function packetIdExists(packet_id) {
+  const c = getContract();
+  return c.packetIdExists(packet_id);
+}
+
+async function checkFarmerBatchExists(farmer_id, batch_id) {
+  const c = getContract();
+  return c.checkFarmerBatchExists(farmer_id, batch_id);
+}
+
+async function getHarvestForBatch(batch_id) {
+  const c = getContract();
+  return c.getHarvestForBatch(batch_id);
+}
+
+// Get all farmers and batches by querying HarvestRegistered events
+// Replace your getAllFarmersAndBatches function with this improved version:
+
+async function getAllFarmersAndBatches() {
+  try {
+    const c = getContract();
+    const provider = getProvider();
+    
+    console.log("Starting getAllFarmersAndBatches...");
+    
+    // Get contract address
+    const contractAddress = process.env.CONTRACT_ADDRESS;
+    if (!contractAddress) {
+      console.error("CONTRACT_ADDRESS not set in environment");
+      return {};
+    }
+    console.log("Contract address:", contractAddress);
+    
+    // Verify contract has code
+    const code = await provider.getCode(contractAddress);
+    if (code === '0x') {
+      console.error("No contract code at address:", contractAddress);
+      return {};
+    }
+    console.log("Contract code verified, length:", code.length);
+    
+    let events = [];
+
+    // Preferred path: read unindexed HarvestRecorded events (plain strings)
+    try {
+      if (c.filters && typeof c.filters.HarvestRecorded === 'function') {
+        console.log("Using contract.queryFilter for HarvestRecorded...");
+        const filterRecorded = c.filters.HarvestRecorded();
+        const recorded = await c.queryFilter(filterRecorded, 0, 'latest');
+        console.log("Found HarvestRecorded via queryFilter:", recorded.length);
+        for (const ev of recorded) {
+          const farmerId = String(ev.args?.farmer_id ?? ev.args?.[0] ?? '');
+          const batchId = String(ev.args?.batch_id ?? ev.args?.[1] ?? '');
+          events.push({ args: { farmer_id: farmerId, batch_id: batchId } });
+        }
+      } else {
+        throw new Error("HarvestRecorded filter not available");
+      }
+    } catch (recordedFilterError) {
+      console.log("HarvestRecorded queryFilter failed, using getLogs:", recordedFilterError.message);
+      try {
+        const recordedIface = new ethers.Interface([
+          "event HarvestRecorded(string farmer_id, string batch_id)"
+        ]);
+        const recordedTopic = ethers.id("HarvestRecorded(string,string)");
+        const logs = await provider.getLogs({ address: contractAddress, topics: [recordedTopic], fromBlock: 0, toBlock: 'latest' });
+        console.log("Found HarvestRecorded logs:", logs.length);
+        for (const log of logs) {
+          try {
+            const parsed = recordedIface.parseLog({ topics: log.topics, data: log.data });
+            const farmerId = String(parsed.args.farmer_id);
+            const batchId = String(parsed.args.batch_id);
+            events.push({ args: { farmer_id: farmerId, batch_id: batchId } });
+          } catch (e) {
+            console.error('Error parsing HarvestRecorded log:', e.message);
+          }
+        }
+      } catch (e) {
+        console.error('HarvestRecorded getLogs failed:', e.message);
+      }
+    }
+    
+    console.log("Total valid events:", events.length);
+    
+    // Build farmer map
+    const farmerMap = {};
+    
+    for (const event of events) {
+      let farmerId = event.args?.farmer_id || event.args?.[0] || '';
+      let batchId = event.args?.batch_id || event.args?.[1] || '';
+      
+      // Convert to string if needed
+      if (farmerId && typeof farmerId !== 'string') {
+        farmerId = farmerId.toString();
+      }
+      if (batchId && typeof batchId !== 'string') {
+        batchId = batchId.toString();
+      }
+      
+      // Validate
+      if (!farmerId || !batchId || 
+          farmerId === 'undefined' || 
+          batchId === 'undefined' ||
+          farmerId === '[object Object]' ||
+          batchId === '[object Object]') {
+        console.log("Skipping invalid event data");
+        continue;
+      }
+      
+      if (!farmerMap[farmerId]) {
+        farmerMap[farmerId] = [];
+      }
+      
+      if (!farmerMap[farmerId].includes(batchId)) {
+        farmerMap[farmerId].push(batchId);
+      }
+    }
+    
+    console.log("Final farmer map:", farmerMap);
+    console.log("Total farmers:", Object.keys(farmerMap).length);
+    
+    return farmerMap;
+    
+  } catch (error) {
+    console.error('Error in getAllFarmersAndBatches:', error);
+    console.error('Error stack:', error.stack);
+    return {};
+  }
+}
+
+// Get batches for a specific farmer
+async function getBatchesForFarmer(farmer_id) {
+  const farmerMap = await getAllFarmersAndBatches();
+  return farmerMap[farmer_id] || [];
+}
+
+// Get all unique farmer IDs
+async function getAllFarmers() {
+  const farmerMap = await getAllFarmersAndBatches();
+  return Object.keys(farmerMap);
+}
+
 module.exports = {
   addHarvest,
   addProcessing,
@@ -140,6 +294,14 @@ module.exports = {
   getDistributor,
   getSupplier,
   getShopkeeper,
+  getBatchPacketCount,
+  batchExists,
+  packetIdExists,
+  checkFarmerBatchExists,
+  getHarvestForBatch,
+  getAllFarmersAndBatches,
+  getBatchesForFarmer,
+  getAllFarmers,
 };
 
 // ----- Roles Helpers -----

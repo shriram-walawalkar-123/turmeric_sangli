@@ -62,6 +62,12 @@ export const API = {
   
   // Recent activity
   getRecentActivity: () => apiClient.get('/api/activity'),
+  
+  // Farmers and batches
+  getFarmers: () => apiClient.get('/api/farmers'),
+  getBatchesForFarmer: (farmerId) => apiClient.get(`/api/farmers/${farmerId}/batches`),
+  getBatchPacketCount: (batchId) => apiClient.get(`/api/batches/${batchId}/packet-count`),
+  checkPacketExists: (packetId) => apiClient.get(`/api/packets/${packetId}/exists`),
 };
 
 export default apiClient;
