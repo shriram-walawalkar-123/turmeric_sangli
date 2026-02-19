@@ -29,7 +29,7 @@ const StageDashboard = () => {
       },
       supplier: {
         name: 'Supplier',
-        color: 'orange',
+        color: 'yellow',
         description: 'Supply chain management stage',
         features: ['Manage supplies', 'Track receipts', 'Monitor inventory', 'Coordinate logistics']
       },
@@ -83,7 +83,6 @@ const StageDashboard = () => {
           </h2>
           <p className="text-gray-700">
             You are logged in as a {stageInfo.name.toLowerCase()} in the turmeric supply chain. 
-            Use the tools below to manage your stage-specific data and contribute to the transparent supply chain.
           </p>
         </div>
 
@@ -101,7 +100,7 @@ const StageDashboard = () => {
                 {feature}
               </h3>
               <p className="text-gray-600 text-sm">
-                Manage and track {feature.toLowerCase()} for your stage
+              {feature.toLowerCase()} for your stage
               </p>
             </div>
           ))}
@@ -109,7 +108,6 @@ const StageDashboard = () => {
 
         {/* Quick Actions */}
         <div className="bg-gray-50 rounded-xl p-6">
-          <h3 className="text-xl font-bold text-gray-800 mb-4">Quick Actions</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <button 
               onClick={() => setActiveView('data-entry')}
@@ -132,10 +130,6 @@ const StageDashboard = () => {
             <div>
               <p className="text-sm text-gray-500 mb-1">Stage</p>
               <p className="text-lg font-medium text-gray-800">{stageInfo.name}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500 mb-1">Access Level</p>
-              <p className="text-lg font-medium text-gray-800">Stage User</p>
             </div>
             <div>
               <p className="text-sm text-gray-500 mb-1">Status</p>

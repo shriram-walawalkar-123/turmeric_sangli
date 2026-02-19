@@ -107,7 +107,6 @@ function HomePage() {
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
       <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-3xl">
         <h1 className="text-3xl font-bold text-gray-900 mb-6 text-center">Turmeric Supply Chain</h1>
-        <p className="text-gray-600 text-center mb-8">Choose what you want to do</p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Link to="/tracking" className="block bg-blue-50 hover:bg-blue-100 border-2 border-blue-200 rounded-xl p-6 text-center transition-all">
             <div className="text-xl font-bold text-blue-800 mb-1">Track Packet History</div>
@@ -117,7 +116,7 @@ function HomePage() {
   className="block bg-purple-50 hover:bg-purple-100 border-2 border-purple-200 rounded-xl p-6 text-center transition-all w-full break-words"
 >
   <div className="text-xl font-bold text-purple-800 mb-1 break-words">
-    Stage Login
+  Login
   </div>
   <div className="text-purple-600 break-words">
    Farmer / Processor / Distributor / Supplier / Shopkeeper
@@ -126,7 +125,7 @@ function HomePage() {
 
           <Link to="/admin/login" className="block bg-green-50 hover:bg-green-100 border-2 border-green-200 rounded-xl p-6 text-center transition-all">
             <div className="text-xl font-bold text-green-800 mb-1">Admin</div>
-            <div className="text-green-600">Admin authentication and panel</div>
+            <div className="text-green-600">Admin authentication</div>
           </Link>
         </div>
       </div>

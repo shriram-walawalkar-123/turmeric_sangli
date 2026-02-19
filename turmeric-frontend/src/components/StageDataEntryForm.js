@@ -9,6 +9,25 @@ const StageDataEntryForm = ({ onBack }) => {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
+  const [packetValidation, setPacketValidation] = useState({ status: null, message: '' });
+  const actorId = useMemo(
+    () => stageUser?.username || stageUser?.id || '',
+    [stageUser?.username, stageUser?.id]
+  );
+  const actorIdFieldName = useMemo(() => {
+    switch (stageUser?.stage) {
+      case 'farmer':
+        return 'farmer_id';
+      case 'distributor':
+        return 'distributor_id';
+      case 'supplier':
+        return 'supplier_id';
+      case 'shopkeeper':
+        return 'shopkeeper_id';
+      default:
+        return null;
+    }
+  }, [stageUser?.stage]);
   
   // Processing stage specific state
   const [farmers, setFarmers] = useState([]);
@@ -107,6 +126,26 @@ const StageDataEntryForm = ({ onBack }) => {
     () => stageConfig.fields.filter(f => f.name.includes('gps')).map(f => f.name),
     [stageConfig]
   );
+
+  // When stage changes (rare), reset form input state but preserve auto-filled ID
+  useEffect(() => {
+    const resetData = {};
+    if (actorIdFieldName && actorId) {
+      resetData[actorIdFieldName] = actorId;
+    }
+    setFormData(resetData);
+    setQrDataUrl('');
+    setPacketValidation({ status: null, message: '' }); // Reset packet validation
+  }, [stageUser?.stage, actorIdFieldName, actorId]);
+
+  // Auto-fill the logged-in user's id into that stage's id field (e.g. farmer_id).
+  useEffect(() => {
+    if (!actorIdFieldName || !actorId) return;
+    setFormData((prev) => ({
+      ...prev,
+      [actorIdFieldName]: actorId,
+    }));
+  }, [actorIdFieldName, actorId]);
 
   const formatCoords = (coords) => `${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}`;
 
@@ -227,25 +266,71 @@ const StageDataEntryForm = ({ onBack }) => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    
+    // Prevent manual changes to auto-filled ID field
+    if (name === actorIdFieldName) {
+      return;
+    }
+    
     setFormData({
       ...formData,
       [name]: value
     });
     
-    // Validate packet ID uniqueness when changed (for processing stage)
-    if (stageUser?.stage === 'processing' && name === 'packet_id' && value) {
+    // Validate packet ID when changed
+    if (name === 'packet_id' && value) {
       validatePacketId(value);
     }
   };
 
   const validatePacketId = async (packetId) => {
+    if (!packetId || packetId.trim() === '') {
+      setPacketValidation({ status: null, message: '' });
+      return;
+    }
+
     try {
-      const response = await API.checkPacketExists(packetId);
-      if (response.data.exists) {
-        setError(`Packet ID "${packetId}" already exists. Each packet must be unique.`);
+      const currentStage = stageUser?.stage;
+      
+      if (currentStage === 'processing') {
+        // For processing stage: packet must NOT exist (must be unique)
+        const response = await API.checkPacketExists(packetId);
+        if (response.data.exists) {
+          setPacketValidation({ 
+            status: 'error', 
+            message: `Packet ID "${packetId}" already exists. Each packet must be unique.` 
+          });
+          setError(`Packet ID "${packetId}" already exists. Each packet must be unique.`);
+        } else {
+          setPacketValidation({ 
+            status: 'success', 
+            message: 'Packet ID is available and can be created.' 
+          });
+          setError(''); // Clear any previous errors
+        }
+      } else if (['distributor', 'supplier', 'shopkeeper'].includes(currentStage)) {
+        // For other stages: packet must exist and not be used in this stage
+        const response = await API.validatePacketForStage(packetId, currentStage);
+        if (response.data.valid) {
+          setPacketValidation({ 
+            status: 'success', 
+            message: response.data.message || 'Packet ID is valid and available for this stage.' 
+          });
+          setError(''); // Clear any previous errors
+        } else {
+          setPacketValidation({ 
+            status: 'error', 
+            message: response.data.message || 'Invalid packet ID.' 
+          });
+          setError(response.data.message || 'Invalid packet ID.');
+        }
       }
     } catch (err) {
-      // Ignore validation errors, contract will handle it
+      setPacketValidation({ 
+        status: 'error', 
+        message: err.response?.data?.error || err.message || 'Failed to validate packet ID.' 
+      });
+      setError(err.response?.data?.error || err.message || 'Failed to validate packet ID.');
       console.error('Packet validation error:', err);
     }
   };
@@ -268,6 +353,17 @@ const StageDataEntryForm = ({ onBack }) => {
         submitData.batch_id = selectedBatch;
       }
 
+      // Validate packet_id before submission for stages that use it
+      const stagesWithPacketId = ['distributor', 'supplier', 'shopkeeper'];
+      if (stagesWithPacketId.includes(stageUser?.stage) && submitData.packet_id) {
+        const validation = await API.validatePacketForStage(submitData.packet_id, stageUser.stage);
+        if (!validation.data.valid) {
+          setError(validation.data.message || 'Invalid packet ID. Please check and try again.');
+          setLoading(false);
+          return;
+        }
+      }
+
       const data = await API[stageConfig.submitEndpoint](submitData);
       setSuccess('Data submitted successfully!');
       // Generate QR only for processing stage using packet_id (or packetId field name)
@@ -285,7 +381,13 @@ const StageDataEntryForm = ({ onBack }) => {
           }
         }
       }
-      setFormData({});
+      // Reset form but preserve auto-filled ID field
+      const resetData = {};
+      if (actorIdFieldName && actorId) {
+        resetData[actorIdFieldName] = actorId;
+      }
+      setFormData(resetData);
+      setPacketValidation({ status: null, message: '' }); // Reset packet validation
       // Reset farmer/batch selections for processing stage
       if (stageUser?.stage === 'processing') {
         setSelectedFarmer('');
@@ -304,7 +406,7 @@ const StageDataEntryForm = ({ onBack }) => {
       farmer: 'green',
       processing: 'blue',
       distributor: 'purple',
-      supplier: 'orange',
+      supplier: 'yellow',
       shopkeeper: 'red'
     };
     return colors[stage] || 'gray';
@@ -450,32 +552,51 @@ const StageDataEntryForm = ({ onBack }) => {
                     ))}
                   </select>
                 ) : (
-                  <div className="flex gap-2 items-center">
-                    <input
-                      type={field.type}
-                      name={field.name}
-                      value={formData[field.name] || ''}
-                      onChange={handleInputChange}
-                      placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
-                      className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-${stageColor}-500 focus:border-transparent transition-all duration-200 ${field.name.includes('gps') ? 'bg-gray-50' : ''}`}
-                      required={field.required}
-                      readOnly={field.name.includes('gps')}
-                    />
-                    {field.name.includes('gps') && (
-                      <button
-                        type="button"
-                        onClick={fetchLocation}
-                        title="Use current location"
-                        className={`shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 focus:ring-2 focus:ring-${stageColor}-500`}
-                        disabled={geoStatus.fetching}
-                      >
-                        {geoStatus.fetching ? (
-                          <RefreshCw className="animate-spin" size={16} />
-                        ) : (
-                          <MapPin size={16} />
-                        )}
-                        <span className="hidden md:inline">{geoStatus.fetching ? 'Locating...' : 'Use GPS'}</span>
-                      </button>
+                  <div className="flex flex-col gap-1">
+                    <div className="flex gap-2 items-center">
+                      <input
+                        type={field.type}
+                        name={field.name}
+                        value={formData[field.name] || ''}
+                        onChange={handleInputChange}
+                        placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
+                        className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-${stageColor}-500 focus:border-transparent transition-all duration-200 ${
+                          (field.name.includes('gps') || field.name === actorIdFieldName) ? 'bg-gray-50 border-gray-300' : 
+                          field.name === 'packet_id' && packetValidation.status === 'error' ? 'border-red-500 bg-red-50' :
+                          field.name === 'packet_id' && packetValidation.status === 'success' ? 'border-green-500 bg-green-50' :
+                          'border-gray-300'
+                        }`}
+                        required={field.required}
+                        readOnly={field.name.includes('gps') || field.name === actorIdFieldName}
+                      />
+                      {field.name.includes('gps') && (
+                        <button
+                          type="button"
+                          onClick={fetchLocation}
+                          title="Use current location"
+                          className={`shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 focus:ring-2 focus:ring-${stageColor}-500`}
+                          disabled={geoStatus.fetching}
+                        >
+                          {geoStatus.fetching ? (
+                            <RefreshCw className="animate-spin" size={16} />
+                          ) : (
+                            <MapPin size={16} />
+                          )}
+                          <span className="hidden md:inline">{geoStatus.fetching ? 'Locating...' : 'Use GPS'}</span>
+                        </button>
+                      )}
+                    </div>
+                    {/* Packet ID validation feedback */}
+                    {field.name === 'packet_id' && packetValidation.status && packetValidation.message && (
+                      <div className={`text-sm px-2 py-1 rounded flex items-center gap-1 ${
+                        packetValidation.status === 'error' ? 'text-red-700 bg-red-50' : 
+                        packetValidation.status === 'success' ? 'text-green-700 bg-green-50' : 
+                        ''
+                      }`}>
+                        {packetValidation.status === 'success' && <CheckCircle size={14} />}
+                        {packetValidation.status === 'error' && <AlertCircle size={14} />}
+                        <span>{packetValidation.message}</span>
+                      </div>
                     )}
                   </div>
                 )}

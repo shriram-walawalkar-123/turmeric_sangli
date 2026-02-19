@@ -5,7 +5,7 @@ const STAGES = [
   { id: 'farmer', name: 'Farmer', color: 'green', description: 'Harvest and initial processing' },
   { id: 'processing', name: 'Processing', color: 'blue', description: 'Grinding and packaging' },
   { id: 'distributor', name: 'Distributor', color: 'purple', description: 'Distribution and logistics' },
-  { id: 'supplier', name: 'Supplier', color: 'orange', description: 'Supply chain management' },
+  { id: 'supplier', name: 'Supplier', color: 'yellow', description: 'Supply chain management' },
   { id: 'shopkeeper', name: 'Shopkeeper', color: 'red', description: 'Retail and final sale' }
 ];
 
@@ -178,12 +178,14 @@ if (res?.token) {
           )}
 
           <button
-            type="submit"
-            disabled={isLoading}
-            className={`w-full bg-gradient-to-r from-${selectedStage.color}-600 to-${selectedStage.color}-700 text-white py-3 px-4 rounded-lg font-medium hover:from-${selectedStage.color}-700 hover:to-${selectedStage.color}-800 focus:ring-4 focus:ring-${selectedStage.color}-300 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed`}
-          >
-            {isLoading ? 'Logging in...' : `Login as ${selectedStage.name}`}
-          </button>
+  type="submit"
+  disabled={isLoading}
+  className={`w-full bg-gradient-to-r from-${selectedStage.color}-600 to-${selectedStage.color}-700 text-white hover:from-${selectedStage.color}-700 hover:to-${selectedStage.color}-800 focus:ring-4 focus:ring-${selectedStage.color}-300
+   py-3 px-4 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed`}
+>
+  {isLoading ? 'Logging in...' : `Login as ${selectedStage.name}`}
+</button>
+
         </form>
 
         <div className="mt-6 text-center">

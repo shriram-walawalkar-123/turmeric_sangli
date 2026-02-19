@@ -144,6 +144,73 @@ async function packetIdExists(packet_id) {
   return c.packetIdExists(packet_id);
 }
 
+// Check if packet_id has been used in distributor stage
+async function checkDistributorExists(packet_id) {
+  try {
+    const distributor = await getDistributor(packet_id);
+    // Check if distributor_id field is non-empty (indicates it's been used)
+    return distributor && distributor.distributor_id && distributor.distributor_id.length > 0;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Check if packet_id has been used in supplier stage
+async function checkSupplierExists(packet_id) {
+  try {
+    const supplier = await getSupplier(packet_id);
+    // Check if supplier_id field is non-empty (indicates it's been used)
+    return supplier && supplier.supplier_id && supplier.supplier_id.length > 0;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Check if packet_id has been used in shopkeeper stage
+async function checkShopkeeperExists(packet_id) {
+  try {
+    const shopkeeper = await getShopkeeper(packet_id);
+    // Check if shopkeeper_id field is non-empty (indicates it's been used)
+    return shopkeeper && shopkeeper.shopkeeper_id && shopkeeper.shopkeeper_id.length > 0;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Validate packet_id for a specific stage
+async function validatePacketForStage(packet_id, stage) {
+  // First check if packet exists
+  const packetExists = await packetIdExists(packet_id);
+  if (!packetExists) {
+    return { valid: false, message: 'Packet ID does not exist. Packet must be created by processing stage first.' };
+  }
+
+  // Check if packet has already been used in this stage
+  let alreadyUsed = false;
+  switch (stage) {
+    case 'distributor':
+      alreadyUsed = await checkDistributorExists(packet_id);
+      if (alreadyUsed) {
+        return { valid: false, message: 'This packet ID has already been used in the distributor stage. Each packet can only be processed once per stage.' };
+      }
+      break;
+    case 'supplier':
+      alreadyUsed = await checkSupplierExists(packet_id);
+      if (alreadyUsed) {
+        return { valid: false, message: 'This packet ID has already been used in the supplier stage. Each packet can only be processed once per stage.' };
+      }
+      break;
+    case 'shopkeeper':
+      alreadyUsed = await checkShopkeeperExists(packet_id);
+      if (alreadyUsed) {
+        return { valid: false, message: 'This packet ID has already been used in the shopkeeper stage. Each packet can only be processed once per stage.' };
+      }
+      break;
+  }
+
+  return { valid: true, message: 'Packet ID is valid and available for this stage.' };
+}
+
 async function checkFarmerBatchExists(farmer_id, batch_id) {
   const c = getContract();
   return c.checkFarmerBatchExists(farmer_id, batch_id);
@@ -302,6 +369,10 @@ module.exports = {
   getAllFarmersAndBatches,
   getBatchesForFarmer,
   getAllFarmers,
+  checkDistributorExists,
+  checkSupplierExists,
+  checkShopkeeperExists,
+  validatePacketForStage,
 };
 
 // ----- Roles Helpers -----

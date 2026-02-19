@@ -20,6 +20,7 @@ const {
   getBatchesForFarmer,
   getAllFarmers,
   getHarvestForBatch,
+  validatePacketForStage,
 } = require('./services/contractService');
 const { stageGuard } = require('./middleware/stageRole');
 
@@ -76,8 +77,34 @@ router.post("/processing", stageGuard('processing'), async (req, res) => {
 
     console.log("Processing data received ok shriram: ",req.body);
 
+    // First record the processing details on-chain
     const tx = await addProcessing(req.body);
     const receipt = await tx.wait();
+
+    // Then register the packet in the dedicated packets mapping so that
+    // distributor/supplier/shopkeeper stages can validate and use this packet_id.
+    // Packet should exist and stay valid across stages until shopkeeper consumes it.
+    try {
+      const packetTx = await addPacket({
+        unique_packet_id: req.body.packet_id,
+        batch_id: req.body.batch_id,
+        current_stage: 'processing',
+      });
+      await packetTx.wait();
+    } catch (packetError) {
+      // If packet registration fails, surface a clear message while preserving
+      // the original processing transaction result.
+      console.error('Failed to register packet after processing:', packetError);
+      const msg =
+        packetError?.error?.message ||
+        packetError?.reason ||
+        packetError?.message ||
+        String(packetError);
+      return res
+        .status(500)
+        .json({ error: `Processing saved but packet registration failed: ${msg}` });
+    }
+
     res.status(200).json({ message: "Processing recorded on-chain", txHash: receipt.hash });
   } catch (error) {
     // Surface contract revert messages nicely
@@ -92,6 +119,13 @@ router.post("/distributor", stageGuard('distributor'), async (req, res) => {
     requireFields(req.body, [
       'packet_id', 'distributor_id', 'gps_coordinates', 'received_box_code', 'dispatch_date', 'sending_box_code', 'supplier_id'
     ]);
+    
+    // Validate packet_id exists and hasn't been used in distributor stage
+    const validation = await validatePacketForStage(req.body.packet_id, 'distributor');
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.message });
+    }
+    
     const tx = await addDistributor(req.body);
     const receipt = await tx.wait();
     res.status(200).json({ message: "Distributor recorded on-chain", txHash: receipt.hash });
@@ -106,6 +140,13 @@ router.post("/supplier", stageGuard('supplier'), async (req, res) => {
     requireFields(req.body, [
       'packet_id', 'supplier_id', 'received_box_code', 'gps_coordinates', 'receipt_date', 'shopkeeper_id'
     ]);
+    
+    // Validate packet_id exists and hasn't been used in supplier stage
+    const validation = await validatePacketForStage(req.body.packet_id, 'supplier');
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.message });
+    }
+    
     const tx = await addSupplier(req.body);
     const receipt = await tx.wait();
     res.status(200).json({ message: "Supplier recorded on-chain", txHash: receipt.hash });
@@ -120,6 +161,13 @@ router.post("/shopkeeper", stageGuard('shopkeeper'), async (req, res) => {
     requireFields(req.body, [
       'packet_id', 'shopkeeper_id', 'gps_coordinates', 'date_received'
     ]);
+    
+    // Validate packet_id exists and hasn't been used in shopkeeper stage
+    const validation = await validatePacketForStage(req.body.packet_id, 'shopkeeper');
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.message });
+    }
+    
     const tx = await addShopkeeper(req.body);
     const receipt = await tx.wait();
     res.status(200).json({ message: "Shopkeeper recorded on-chain", txHash: receipt.hash });
@@ -294,6 +342,22 @@ router.get("/packets/:packetId/exists", async (req, res) => {
     const { packetId } = req.params;
     const exists = await packetIdExists(packetId);
     res.status(200).json({ packetId, exists });
+  } catch (error) {
+    res.status(500).json({ error: error.message || String(error) });
+  }
+});
+
+// Validate packet ID for a specific stage
+router.get("/packets/:packetId/validate/:stage", async (req, res) => {
+  try {
+    const { packetId, stage } = req.params;
+    const validation = await validatePacketForStage(packetId, stage);
+    res.status(200).json({ 
+      packetId, 
+      stage,
+      valid: validation.valid,
+      message: validation.message 
+    });
   } catch (error) {
     res.status(500).json({ error: error.message || String(error) });
   }

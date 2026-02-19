@@ -68,6 +68,7 @@ export const API = {
   getBatchesForFarmer: (farmerId) => apiClient.get(`/api/farmers/${farmerId}/batches`),
   getBatchPacketCount: (batchId) => apiClient.get(`/api/batches/${batchId}/packet-count`),
   checkPacketExists: (packetId) => apiClient.get(`/api/packets/${packetId}/exists`),
+  validatePacketForStage: (packetId, stage) => apiClient.get(`/api/packets/${packetId}/validate/${stage}`),
 };
 
 export default apiClient;
