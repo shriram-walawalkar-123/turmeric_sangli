@@ -11,6 +11,7 @@ import AdminLogin from './components/AdminLogin';
 import AdminPanel from './components/AdminPanel';
 import StageLogin from './components/StageLogin';
 import StageDashboard from './components/StageDashboard';
+import ChatbotWidget from './components/ChatbotWidget';
 
 function RequireAdminAuth({ children }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -239,6 +240,7 @@ function App() {
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          <ChatbotWidget />
         </BrowserRouter>
       </StageAuthProvider>
     </AuthProvider>
