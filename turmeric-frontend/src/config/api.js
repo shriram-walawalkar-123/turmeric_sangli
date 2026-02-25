@@ -67,8 +67,15 @@ export const API = {
   getFarmers: () => apiClient.get('/api/farmers'),
   getBatchesForFarmer: (farmerId) => apiClient.get(`/api/farmers/${farmerId}/batches`),
   getBatchPacketCount: (batchId) => apiClient.get(`/api/batches/${batchId}/packet-count`),
+  getBatchInfo: (batchId, packetSizeGm) => apiClient.get(`/api/batches/${batchId}/info`, { params: packetSizeGm != null ? { packet_size_gm: packetSizeGm } : {} }),
+  createPackets: (batchId, data) => apiClient.post(`/api/batches/${batchId}/create-packets`, data),
+  getPacketsByStage: (batchId, stage) => apiClient.get(`/api/batches/${batchId}/packets-by-stage`, { params: { stage } }),
   checkPacketExists: (packetId) => apiClient.get(`/api/packets/${packetId}/exists`),
   validatePacketForStage: (packetId, stage) => apiClient.get(`/api/packets/${packetId}/validate/${stage}`),
+  // Bulk receive (send packets to next stage)
+  distributorReceive: (data) => apiClient.post('/api/distributor/receive', data),
+  supplierReceive: (data) => apiClient.post('/api/supplier/receive', data),
+  shopkeeperReceive: (data) => apiClient.post('/api/shopkeeper/receive', data),
 };
 
 export default apiClient;

@@ -25,6 +25,7 @@ contract TurmericSupplyChain is AccessControl {
         string gps_coordinates;
         string fertilizer;
         string organic_status;
+        uint256 quantity_gm;  // raw turmeric quantity in grams (before processing loss)
     }
 
     struct Processing {
@@ -38,6 +39,22 @@ contract TurmericSupplyChain is AccessControl {
         string packaging_date;
         string packaging_unit;
         string packet_id;
+        string expiry_date;
+        string sending_box_code;
+        string distributor_id;
+    }
+
+    // Batch-level processing info (no packet_id) - set once per batch when creating packets
+    struct BatchProcessing {
+        string batch_id;
+        string processing_gps;
+        string grinding_facility_name;
+        uint256 moisture_content;
+        uint256 curcumin_content;
+        string heavy_metals;
+        string physical_properties;
+        string packaging_date;
+        string packaging_unit;
         string expiry_date;
         string sending_box_code;
         string distributor_id;
@@ -71,6 +88,7 @@ contract TurmericSupplyChain is AccessControl {
     mapping(string => Packet) private packets;
     mapping(string => Harvest) private harvests;
     mapping(string => Processing) private processings;
+    mapping(string => BatchProcessing) private batchProcessings;
     mapping(string => Distributor) private distributors;
     mapping(string => Supplier) private suppliers;
     mapping(string => Shopkeeper) private shopkeepers;
@@ -116,8 +134,14 @@ contract TurmericSupplyChain is AccessControl {
         
         harvests[batch_id] = h;
         emit HarvestRegistered(h.farmer_id, batch_id);
-        // Also emit unindexed version for reading raw string values off-chain
         emit HarvestRecorded(h.farmer_id, batch_id);
+    }
+
+    // Set batch-level processing info once per batch (no packet registration)
+    function setBatchProcessing(string memory batch_id, BatchProcessing memory bp) public onlyRole(PROCESSOR_ROLE) {
+        require(keccak256(bytes(bp.batch_id)) == keccak256(bytes(batch_id)), "Batch ID mismatch");
+        require(batchIds[batch_id], "Batch ID does not exist.");
+        batchProcessings[batch_id] = bp;
     }
 
     function addProcessing(string memory batch_id, Processing memory p) public onlyRole(PROCESSOR_ROLE) {
@@ -175,8 +199,79 @@ contract TurmericSupplyChain is AccessControl {
     }
 
     function addPacket(string memory packet_id, Packet memory p) public onlyRole(PROCESSOR_ROLE) {
+        require(!packetExists[packet_id], "Packet ID already exists");
+        require(batchIds[p.batch_id], "Batch ID does not exist.");
+        packetExists[packet_id] = true;
+        batchPacketCount[p.batch_id] = batchPacketCount[p.batch_id] + 1;
         packets[packet_id] = p;
         emit PacketRegistered(p.unique_packet_id, p.batch_id, p.current_stage);
+        emit PacketCountUpdated(p.batch_id, batchPacketCount[p.batch_id]);
+    }
+
+    /// @notice Register multiple packets in one transaction (avoids nonce issues when creating many packets).
+    function addPacketsInBatch(string memory batch_id, string[] calldata packet_ids) public onlyRole(PROCESSOR_ROLE) {
+        require(batchIds[batch_id], "Batch does not exist.");
+        for (uint256 i = 0; i < packet_ids.length; i++) {
+            string memory pid = packet_ids[i];
+            require(!packetExists[pid], "Packet ID already exists");
+            packetExists[pid] = true;
+            batchPacketCount[batch_id] = batchPacketCount[batch_id] + 1;
+            packets[pid] = Packet(pid, batch_id, "processing", true);
+            emit PacketRegistered(pid, batch_id, "processing");
+        }
+        if (packet_ids.length > 0) {
+            emit PacketCountUpdated(batch_id, batchPacketCount[batch_id]);
+        }
+    }
+
+    /// @notice Create multiple packets in one tx; contract generates unique IDs (keccak256(batchId, index, block.timestamp))-style uniqueness.
+    /// IDs are readable: farmerId-batchId-{weight}g-{seq}.
+    function createPackets(string memory batch_id, string memory farmer_id, uint256 count, uint256 weightPerPacketGm) public onlyRole(PROCESSOR_ROLE) {
+        require(batchIds[batch_id], "Batch does not exist.");
+        require(count > 0 && count <= 500, "Count must be 1-500");
+        uint256 startIndex = batchPacketCount[batch_id];
+        for (uint256 i = 0; i < count; i++) {
+            uint256 seq = startIndex + i + 1;
+            string memory packetId = string(abi.encodePacked(
+                farmer_id, "-", batch_id, "-", _uint2str(weightPerPacketGm), "g-",
+                _padSeq(seq)
+            ));
+            require(!packetExists[packetId], "Packet ID already exists");
+            packetExists[packetId] = true;
+            batchPacketCount[batch_id] = batchPacketCount[batch_id] + 1;
+            packets[packetId] = Packet(packetId, batch_id, "processing", true);
+            emit PacketRegistered(packetId, batch_id, "processing");
+        }
+        emit PacketCountUpdated(batch_id, batchPacketCount[batch_id]);
+    }
+
+    /// Pad sequence to at least 3 digits: 1 -> "001", 12 -> "012", 123 -> "123"
+    function _padSeq(uint256 _i) internal pure returns (string memory) {
+        if (_i == 0) return "000";
+        string memory s = _uint2str(_i);
+        if (bytes(s).length >= 3) return s;
+        if (bytes(s).length == 1) return string(abi.encodePacked("00", s));
+        return string(abi.encodePacked("0", s));
+    }
+
+    function _uint2str(uint256 _i) internal pure returns (string memory) {
+        if (_i == 0) return "0";
+        uint256 j = _i;
+        uint256 len;
+        while (j != 0) {
+            len++;
+            j /= 10;
+        }
+        bytes memory b = new bytes(len);
+        uint256 k = len;
+        j = _i;
+        while (j != 0) {
+            k = k > 0 ? k - 1 : 0;
+            uint8 t = uint8(48 + j % 10);
+            b[k] = bytes1(t);
+            j /= 10;
+        }
+        return string(b);
     }
 
     // ---------------- READ FUNCTIONS ----------------
@@ -229,5 +324,10 @@ contract TurmericSupplyChain is AccessControl {
     // Get harvest for a batch (to retrieve farmer_id)
     function getHarvestForBatch(string memory batch_id) public view returns (Harvest memory) {
         return harvests[batch_id];
+    }
+
+    // Get batch-level processing for a batch
+    function getBatchProcessing(string memory batch_id) public view returns (BatchProcessing memory) {
+        return batchProcessings[batch_id];
     }
 }

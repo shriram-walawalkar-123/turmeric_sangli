@@ -1,668 +1,604 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useStageAuth } from '../context/StageAuthContext';
 import { API } from '../config/api';
 import { Save, CheckCircle, AlertCircle, ArrowLeft, MapPin, RefreshCw } from 'lucide-react';
-import QRCode from 'qrcode';
+
+// ── Defined OUTSIDE component so they are never recreated on re-render ─────────
+const inputClass = "w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all";
+const selectClass = inputClass;
+
+const FormField = ({ label, required, children }) => (
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-1">
+      {label}{required && <span className="text-red-500 ml-1">*</span>}
+    </label>
+    {children}
+  </div>
+);
+
+const GpsInput = ({ value, onChange, onFetch, fetching }) => (
+  <div className="flex gap-2 items-center">
+    <input value={value || ''} onChange={onChange} placeholder="lat, lng" className={inputClass} readOnly />
+    <button type="button" onClick={onFetch} disabled={fetching}
+      className="shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50">
+      {fetching ? <RefreshCw className="animate-spin" size={16} /> : <MapPin size={16} />}
+      <span className="hidden md:inline">{fetching ? 'Locating...' : 'GPS'}</span>
+    </button>
+  </div>
+);
+// ─────────────────────────────────────────────────────────────────────────────
 
 const StageDataEntryForm = ({ onBack }) => {
   const { stageUser } = useStageAuth();
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
-  const [packetValidation, setPacketValidation] = useState({ status: null, message: '' });
+
   const actorId = useMemo(
     () => stageUser?.username || stageUser?.id || '',
     [stageUser?.username, stageUser?.id]
   );
   const actorIdFieldName = useMemo(() => {
     switch (stageUser?.stage) {
-      case 'farmer':
-        return 'farmer_id';
-      case 'distributor':
-        return 'distributor_id';
-      case 'supplier':
-        return 'supplier_id';
-      case 'shopkeeper':
-        return 'shopkeeper_id';
-      default:
-        return null;
+      case 'farmer': return 'farmer_id';
+      case 'distributor': return 'distributor_id';
+      case 'supplier': return 'supplier_id';
+      case 'shopkeeper': return 'shopkeeper_id';
+      default: return null;
     }
   }, [stageUser?.stage]);
-  
-  // Processing stage specific state
+
   const [farmers, setFarmers] = useState([]);
   const [selectedFarmer, setSelectedFarmer] = useState('');
   const [batches, setBatches] = useState([]);
   const [selectedBatch, setSelectedBatch] = useState('');
-  const [batchPacketCount, setBatchPacketCount] = useState(null);
   const [loadingFarmers, setLoadingFarmers] = useState(false);
   const [loadingBatches, setLoadingBatches] = useState(false);
-
-  const getStageFormConfig = (stage) => {
-    const configs = {
-      farmer: {
-        title: 'Harvest Data Entry',
-        description: 'Record harvest information and initial processing data',
-        fields: [
-          { name: 'farmer_id', label: 'Farmer ID', type: 'text', required: true },
-          { name: 'product_name', label: 'Product Name', type: 'text', required: true },
-          { name: 'batch_id', label: 'Batch ID', type: 'text', required: true },
-          { name: 'harvest_date', label: 'Harvest Date', type: 'date', required: true },
-          { name: 'gps_coordinates', label: 'GPS Coordinates', type: 'text', required: true, placeholder: 'lat, lng' },
-          { name: 'fertilizer', label: 'Fertilizer Used', type: 'text', required: false },
-          { name: 'organic_status', label: 'Organic Status', type: 'select', required: true, options: ['Organic', 'Non-Organic'] }
-        ],
-        submitEndpoint: 'addHarvest'
-      },
-      processing: {
-        title: 'Processing Data Entry',
-        description: 'Record processing and packaging information',
-        fields: [
-          // batch_id will be handled separately with dropdowns
-          { name: 'processing_gps', label: 'Processing GPS', type: 'text', required: true, placeholder: 'lat, lng' },
-          { name: 'grinding_facility_name', label: 'Grinding Facility Name', type: 'text', required: true },
-          { name: 'moisture_content', label: 'Moisture Content (%)', type: 'number', required: true },
-          { name: 'curcumin_content', label: 'Curcumin Content (%)', type: 'number', required: true },
-          { name: 'heavy_metals', label: 'Heavy Metals Check', type: 'select', required: true, options: ['Pass', 'Fail'] },
-          { name: 'physical_properties', label: 'Physical Properties', type: 'text', required: true },
-          { name: 'packaging_date', label: 'Packaging Date', type: 'date', required: true },
-          { name: 'packaging_unit', label: 'Packaging Unit', type: 'text', required: true },
-          { name: 'packet_id', label: 'Packet ID', type: 'text', required: true },
-          { name: 'expiry_date', label: 'Expiry Date', type: 'date', required: true },
-          { name: 'sending_box_code', label: 'Sending Box Code', type: 'text', required: true },
-          { name: 'distributor_id', label: 'Distributor ID', type: 'text', required: true }
-        ],
-        submitEndpoint: 'addProcessing'
-      },
-      distributor: {
-        title: 'Distributor Data Entry',
-        description: 'Record distribution and logistics information',
-        fields: [
-          { name: 'packet_id', label: 'Packet ID', type: 'text', required: true },
-          { name: 'distributor_id', label: 'Distributor ID', type: 'text', required: true },
-          { name: 'gps_coordinates', label: 'GPS Coordinates', type: 'text', required: true, placeholder: 'lat, lng' },
-          { name: 'received_box_code', label: 'Received Box Code', type: 'text', required: true },
-          { name: 'dispatch_date', label: 'Dispatch Date', type: 'date', required: true },
-          { name: 'sending_box_code', label: 'Sending Box Code', type: 'text', required: true },
-          { name: 'supplier_id', label: 'Supplier ID', type: 'text', required: true }
-        ],
-        submitEndpoint: 'addDistributor'
-      },
-      supplier: {
-        title: 'Supplier Data Entry',
-        description: 'Record supply chain management information',
-        fields: [
-          { name: 'supplier_id', label: 'Supplier ID', type: 'text', required: true },
-          { name: 'received_box_code', label: 'Received Box Code', type: 'text', required: true },
-          { name: 'gps_coordinates', label: 'GPS Coordinates', type: 'text', required: true, placeholder: 'lat, lng' },
-          { name: 'receipt_date', label: 'Receipt Date', type: 'date', required: true },
-          { name: 'shopkeeper_id', label: 'Shopkeeper ID', type: 'text', required: true },
-          { name: 'packet_id', label: 'Packet ID', type: 'text', required: true }
-        ],
-        submitEndpoint: 'addSupplier'
-      },
-      shopkeeper: {
-        title: 'Shopkeeper Data Entry',
-        description: 'Record retail and final sale information',
-        fields: [
-          { name: 'shopkeeper_id', label: 'Shopkeeper ID', type: 'text', required: true },
-          { name: 'packet_id', label: 'Packet ID', type: 'text', required: true },
-          { name: 'gps_coordinates', label: 'GPS Coordinates', type: 'text', required: true, placeholder: 'lat, lng' },
-          { name: 'date_received', label: 'Date Received', type: 'date', required: true }
-        ],
-        submitEndpoint: 'addShopkeeper'
-      }
-    };
-    return configs[stage] || configs.farmer;
-  };
-
-  const stageConfig = getStageFormConfig(stageUser?.stage);
-  const [formData, setFormData] = useState({});
+  const [batchInfo, setBatchInfo] = useState(null);
+  const [packetSizeGm, setPacketSizeGm] = useState('');
+  const [createPacketCount, setCreatePacketCount] = useState('');
+  const [loadingBatchInfo, setLoadingBatchInfo] = useState(false);
+  const [packetsAtStage, setPacketsAtStage] = useState({ count: 0, packetIds: [] });
+  const [receiveCount, setReceiveCount] = useState('');
+  const [loadingPacketsByStage, setLoadingPacketsByStage] = useState(false);
   const [geoStatus, setGeoStatus] = useState({ fetching: false, error: '' });
-  const [qrDataUrl, setQrDataUrl] = useState('');
-  const qrCanvasRef = useRef(null);
 
-  const gpsFieldNames = useMemo(
-    () => stageConfig.fields.filter(f => f.name.includes('gps')).map(f => f.name),
-    [stageConfig]
-  );
+  // Single formData for processing + farmer fields
+  const [formData, setFormData] = useState({});
+  // Single receiveFormData for distributor/supplier/shopkeeper fields
+  const [receiveFormData, setReceiveFormData] = useState({});
 
-  // When stage changes (rare), reset form input state but preserve auto-filled ID
+  const getStageColor = (stage) => {
+    const colors = { farmer: 'green', processing: 'blue', distributor: 'purple', supplier: 'yellow', shopkeeper: 'red' };
+    return colors[stage] || 'gray';
+  };
+  const stageColor = getStageColor(stageUser?.stage);
+
+  const stageTitle = {
+    farmer: 'Harvest Data Entry',
+    processing: 'Processing Data Entry',
+    distributor: 'Distributor Data Entry',
+    supplier: 'Supplier Data Entry',
+    shopkeeper: 'Shopkeeper Data Entry',
+  }[stageUser?.stage] || '';
+
+  const stageDesc = {
+    farmer: 'Record harvest information.',
+    processing: 'Record processing and packaging information',
+    distributor: 'Receive packets from processing and record distribution details',
+    supplier: 'Receive packets from distributor and record supply details',
+    shopkeeper: 'Receive packets from supplier and record receipt details',
+  }[stageUser?.stage] || '';
+
+  const previousStage = useMemo(() => {
+    if (stageUser?.stage === 'distributor') return 'processing';
+    if (stageUser?.stage === 'supplier') return 'distributor';
+    if (stageUser?.stage === 'shopkeeper') return 'supplier';
+    return null;
+  }, [stageUser?.stage]);
+
+  // ── Reset on stage change ──────────────────────────────────────────────────
   useEffect(() => {
-    const resetData = {};
-    if (actorIdFieldName && actorId) {
-      resetData[actorIdFieldName] = actorId;
+    setFormData(actorIdFieldName && actorId ? { [actorIdFieldName]: actorId } : {});
+    setReceiveFormData(actorIdFieldName && actorId ? { [actorIdFieldName]: actorId } : {});
+    setSelectedFarmer('');
+    setSelectedBatch('');
+    setSuccess('');
+    setError('');
+  }, [stageUser?.stage]); // eslint-disable-line
+
+  // ── Fetch farmers ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (['processing', 'distributor', 'supplier', 'shopkeeper'].includes(stageUser?.stage)) {
+      setLoadingFarmers(true);
+      API.getFarmers()
+        .then(r => setFarmers(r.data.farmers || []))
+        .catch(e => setError(`Failed to load farmers: ${e.message}`))
+        .finally(() => setLoadingFarmers(false));
     }
-    setFormData(resetData);
-    setQrDataUrl('');
-    setPacketValidation({ status: null, message: '' }); // Reset packet validation
-  }, [stageUser?.stage, actorIdFieldName, actorId]);
+  }, [stageUser?.stage]);
 
-  // Auto-fill the logged-in user's id into that stage's id field (e.g. farmer_id).
+  // ── Fetch batches when farmer selected ────────────────────────────────────
   useEffect(() => {
-    if (!actorIdFieldName || !actorId) return;
-    setFormData((prev) => ({
-      ...prev,
-      [actorIdFieldName]: actorId,
-    }));
-  }, [actorIdFieldName, actorId]);
+    if (selectedFarmer) {
+      setLoadingBatches(true);
+      API.getBatchesForFarmer(selectedFarmer)
+        .then(r => { setBatches(r.data.batches || []); setSelectedBatch(''); })
+        .catch(e => { setError(`Failed to load batches: ${e.message}`); setBatches([]); })
+        .finally(() => setLoadingBatches(false));
+    } else {
+      setBatches([]);
+      setSelectedBatch('');
+    }
+  }, [selectedFarmer]);
 
+  // ── Fetch batch info (available gm / max packets) ─────────────────────────
+  useEffect(() => {
+    if (stageUser?.stage === 'processing' && selectedBatch) {
+      setLoadingBatchInfo(true);
+      const size = packetSizeGm ? Number(packetSizeGm) : null;
+      (size && size > 0 ? API.getBatchInfo(selectedBatch, size) : API.getBatchInfo(selectedBatch))
+        .then(r => setBatchInfo(r.data || null))
+        .catch(() => setBatchInfo(null))
+        .finally(() => setLoadingBatchInfo(false));
+    } else {
+      setBatchInfo(null);
+    }
+  }, [selectedBatch, packetSizeGm, stageUser?.stage]);
+
+  // ── Fetch packets at previous stage ───────────────────────────────────────
+  useEffect(() => {
+    if (previousStage && selectedBatch) {
+      setLoadingPacketsByStage(true);
+      API.getPacketsByStage(selectedBatch, previousStage)
+        .then(r => setPacketsAtStage({ count: r.data.count || 0, packetIds: r.data.packetIds || [] }))
+        .catch(() => setPacketsAtStage({ count: 0, packetIds: [] }))
+        .finally(() => setLoadingPacketsByStage(false));
+    } else {
+      setPacketsAtStage({ count: 0, packetIds: [] });
+    }
+  }, [previousStage, selectedBatch]);
+
+  // ── GPS helper ─────────────────────────────────────────────────────────────
   const formatCoords = (coords) => `${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}`;
 
-  const fetchLocation = async () => {
+  const fetchLocation = async (target = 'form', fieldName = 'gps_coordinates') => {
     if (!('geolocation' in navigator)) {
       setGeoStatus({ fetching: false, error: 'Geolocation not supported' });
       return;
     }
     setGeoStatus({ fetching: true, error: '' });
     try {
-      const position = await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0,
-        });
-      });
-
+      const position = await new Promise((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 })
+      );
       const value = formatCoords(position.coords);
-      setFormData((prev) => {
-        const next = { ...prev };
-        gpsFieldNames.forEach((name) => {
-          next[name] = value;
-        });
-        return next;
-      });
+      if (target === 'receive') {
+        setReceiveFormData(prev => ({ ...prev, gps_coordinates: value }));
+      } else {
+        setFormData(prev => ({ ...prev, [fieldName]: value }));
+      }
       setGeoStatus({ fetching: false, error: '' });
     } catch (err) {
-      const message = err?.message || 'Unable to fetch location';
-      setGeoStatus({ fetching: false, error: message });
+      setGeoStatus({ fetching: false, error: err?.message || 'Unable to fetch location' });
     }
   };
 
-  // Auto-fetch GPS on mount when relevant fields exist
+  // Auto-fetch GPS on stage load
   useEffect(() => {
-    if (gpsFieldNames.length > 0) {
-      fetchLocation();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stageConfig.title]);
+    if (stageUser?.stage === 'farmer') fetchLocation('form', 'gps_coordinates');
+    if (stageUser?.stage === 'processing') fetchLocation('form', 'processing_gps');
+    if (['distributor', 'supplier', 'shopkeeper'].includes(stageUser?.stage)) fetchLocation('receive');
+  }, [stageUser?.stage]); // eslint-disable-line
 
-  // Fetch farmers for processing stage
-  useEffect(() => {
-    if (stageUser?.stage === 'processing') {
-      fetchFarmers();
-    }
-  }, [stageUser?.stage]);
-
-  // Fetch batches when farmer is selected
-  useEffect(() => {
-    if (stageUser?.stage === 'processing' && selectedFarmer) {
-      fetchBatchesForFarmer(selectedFarmer);
-    } else {
-      setBatches([]);
-      setSelectedBatch('');
-      setBatchPacketCount(null);
-    }
-  }, [selectedFarmer, stageUser?.stage]);
-
-  // Fetch packet count when batch is selected
-  useEffect(() => {
-    if (stageUser?.stage === 'processing' && selectedBatch) {
-      fetchBatchPacketCount(selectedBatch);
-      // Update formData with batch_id
-      setFormData(prev => ({ ...prev, batch_id: selectedBatch }));
-    } else {
-      setBatchPacketCount(null);
-    }
-  }, [selectedBatch, stageUser?.stage]);
-
-  const fetchFarmers = async () => {
-    setLoadingFarmers(true);
-    try {
-      const response = await API.getFarmers();
-      console.log('Fetched farmers:', response);
-      setFarmers(response.data.farmers || []);
-    } catch (err) {
-      setError(`Failed to load farmers: ${err.message}`);
-    } finally {
-      setLoadingFarmers(false);
-    }
-  };
-
-  const fetchBatchesForFarmer = async (farmerId) => {
-    setLoadingBatches(true);
-    try {
-      const response = await API.getBatchesForFarmer(farmerId);
-      setBatches(response.data.batches || []);
-      setSelectedBatch(''); // Reset batch selection
-    } catch (err) {
-      setError(`Failed to load batches: ${err.message}`);
-      setBatches([]);
-    } finally {
-      setLoadingBatches(false);
-    }
-  };
-
-  const fetchBatchPacketCount = async (batchId) => {
-    try {
-      const response = await API.getBatchPacketCount(batchId);
-      setBatchPacketCount({
-        count: parseInt(response.data.packetCount) || 0,
-        exists: response.data.exists
-      });
-    } catch (err) {
-      console.error('Failed to load packet count:', err);
-      setBatchPacketCount({ count: 0, exists: false });
-    }
-  };
-
-  const handleFarmerChange = (e) => {
-    setSelectedFarmer(e.target.value);
-  };
-
-  const handleBatchChange = (e) => {
-    setSelectedBatch(e.target.value);
-  };
-
-  const handleInputChange = (e) => {
+  // ── Stable onChange handlers (defined once, not inline) ───────────────────
+  const handleFormChange = (e) => {
     const { name, value } = e.target;
-    
-    // Prevent manual changes to auto-filled ID field
-    if (name === actorIdFieldName) {
-      return;
-    }
-    
-    setFormData({
-      ...formData,
-      [name]: value
-    });
-    
-    // Validate packet ID when changed
-    if (name === 'packet_id' && value) {
-      validatePacketId(value);
-    }
+    setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const validatePacketId = async (packetId) => {
-    if (!packetId || packetId.trim() === '') {
-      setPacketValidation({ status: null, message: '' });
-      return;
-    }
-
-    try {
-      const currentStage = stageUser?.stage;
-      
-      if (currentStage === 'processing') {
-        // For processing stage: packet must NOT exist (must be unique)
-        const response = await API.checkPacketExists(packetId);
-        if (response.data.exists) {
-          setPacketValidation({ 
-            status: 'error', 
-            message: `Packet ID "${packetId}" already exists. Each packet must be unique.` 
-          });
-          setError(`Packet ID "${packetId}" already exists. Each packet must be unique.`);
-        } else {
-          setPacketValidation({ 
-            status: 'success', 
-            message: 'Packet ID is available and can be created.' 
-          });
-          setError(''); // Clear any previous errors
-        }
-      } else if (['distributor', 'supplier', 'shopkeeper'].includes(currentStage)) {
-        // For other stages: packet must exist and not be used in this stage
-        const response = await API.validatePacketForStage(packetId, currentStage);
-        if (response.data.valid) {
-          setPacketValidation({ 
-            status: 'success', 
-            message: response.data.message || 'Packet ID is valid and available for this stage.' 
-          });
-          setError(''); // Clear any previous errors
-        } else {
-          setPacketValidation({ 
-            status: 'error', 
-            message: response.data.message || 'Invalid packet ID.' 
-          });
-          setError(response.data.message || 'Invalid packet ID.');
-        }
-      }
-    } catch (err) {
-      setPacketValidation({ 
-        status: 'error', 
-        message: err.response?.data?.error || err.message || 'Failed to validate packet ID.' 
-      });
-      setError(err.response?.data?.error || err.message || 'Failed to validate packet ID.');
-      console.error('Packet validation error:', err);
-    }
+  const handleReceiveChange = (e) => {
+    const { name, value } = e.target;
+    setReceiveFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = async (e) => {
+  // ── Submit: create packets (processing) ───────────────────────────────────
+  const handleCreatePacketsSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    setError('');
-    setSuccess('');
-
+    setLoading(true); setError(''); setSuccess('');
+    const count = parseInt(createPacketCount, 10);
+    const maxPackets = batchInfo?.maxPackets ?? 0;
+    if (!selectedBatch || !packetSizeGm || count < 1 || count > maxPackets) {
+      setError(`Enter number of packets between 1 and ${maxPackets}.`);
+      setLoading(false); return;
+    }
     try {
-      // For processing stage, ensure batch_id is set from selection
-      const submitData = { ...formData };
-      if (stageUser?.stage === 'processing') {
-        if (!selectedBatch) {
-          setError('Please select a batch ID');
-          setLoading(false);
-          return;
-        }
-        submitData.batch_id = selectedBatch;
-      }
-
-      // Validate packet_id before submission for stages that use it
-      const stagesWithPacketId = ['distributor', 'supplier', 'shopkeeper'];
-      if (stagesWithPacketId.includes(stageUser?.stage) && submitData.packet_id) {
-        const validation = await API.validatePacketForStage(submitData.packet_id, stageUser.stage);
-        if (!validation.data.valid) {
-          setError(validation.data.message || 'Invalid packet ID. Please check and try again.');
-          setLoading(false);
-          return;
-        }
-      }
-
-      const data = await API[stageConfig.submitEndpoint](submitData);
-      setSuccess('Data submitted successfully!');
-      // Generate QR only for processing stage using packet_id (or packetId field name)
-      if (stageUser?.stage === 'processing') {
-        const packetId = submitData.packet_id || submitData.packetId || submitData['packet_id'];
-        if (packetId) {
-          const origin = window.location.origin;
-          // Point to public tracking route
-          const trackingUrl = `${origin}/tracking?packetId=${encodeURIComponent(packetId)}`;
-          try {
-            const url = await QRCode.toDataURL(trackingUrl, { width: 512, margin: 2 });
-            setQrDataUrl(url);
-          } catch (qrErr) {
-            console.error('QR generation failed', qrErr);
-          }
-        }
-      }
-      // Reset form but preserve auto-filled ID field
-      const resetData = {};
-      if (actorIdFieldName && actorId) {
-        resetData[actorIdFieldName] = actorId;
-      }
-      setFormData(resetData);
-      setPacketValidation({ status: null, message: '' }); // Reset packet validation
-      // Reset farmer/batch selections for processing stage
-      if (stageUser?.stage === 'processing') {
-        setSelectedFarmer('');
-        setSelectedBatch('');
-        setBatchPacketCount(null);
-      }
-    } catch (error) {
-      setError(error?.message || error?.response?.data?.message || 'Failed to submit data');
+      const payload = {
+        packet_size_gm: Number(packetSizeGm),
+        count,
+        processing_gps: formData.processing_gps || '',
+        grinding_facility_name: formData.grinding_facility_name || '',
+        moisture_content: formData.moisture_content || 0,
+        curcumin_content: formData.curcumin_content || 0,
+        heavy_metals: formData.heavy_metals || '',
+        physical_properties: formData.physical_properties || '',
+        packaging_date: formData.packaging_date || '',
+        packaging_unit: `${packetSizeGm}g`,
+        expiry_date: formData.expiry_date || '',
+        sending_box_code: formData.sending_box_code || '',
+        distributor_id: formData.distributor_id || '',
+      };
+      const res = await API.createPackets(selectedBatch, payload);
+      const createdIds = res.data.packetIds || [];
+      setSuccess(`${res.data.message || `Created ${count} packet(s).`} IDs: ${createdIds.join(', ')}`);
+      setCreatePacketCount('');
+      setPacketSizeGm('');
+      const infoRes = await API.getBatchInfo(selectedBatch);
+      setBatchInfo(infoRes.data);
+    } catch (err) {
+      setError(err?.response?.data?.error || err?.message || 'Failed to create packets.');
     } finally {
       setLoading(false);
     }
   };
 
-  const getStageColor = (stage) => {
-    const colors = {
-      farmer: 'green',
-      processing: 'blue',
-      distributor: 'purple',
-      supplier: 'yellow',
-      shopkeeper: 'red'
-    };
-    return colors[stage] || 'gray';
+  // ── Submit: receive packets (distributor/supplier/shopkeeper) ─────────────
+  const handleReceiveSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true); setError(''); setSuccess('');
+    const count = parseInt(receiveCount, 10);
+    if (!selectedBatch || !selectedFarmer || count < 1 || count > (packetsAtStage.count || 0)) {
+      setError(`Enter number of packets between 1 and ${packetsAtStage.count || 0}.`);
+      setLoading(false); return;
+    }
+    try {
+      const stage = stageUser?.stage;
+      const base = { batch_id: selectedBatch, farmer_id: selectedFarmer, count, ...receiveFormData };
+      if (actorIdFieldName && actorId) base[actorIdFieldName] = base[actorIdFieldName] ?? actorId;
+      let res;
+      if (stage === 'distributor') res = await API.distributorReceive(base);
+      else if (stage === 'supplier') res = await API.supplierReceive(base);
+      else if (stage === 'shopkeeper') res = await API.shopkeeperReceive(base);
+      else throw new Error('Invalid stage');
+      setSuccess(res.data.message || `Received ${count} packet(s).`);
+      setReceiveCount('');
+      setPacketsAtStage(p => ({ count: (p.count || 0) - count, packetIds: [] }));
+    } catch (err) {
+      setError(err?.response?.data?.error || err?.message || 'Failed to receive packets.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const stageColor = getStageColor(stageUser?.stage);
+  // ── Submit: farmer harvest ─────────────────────────────────────────────────
+  const handleFarmerSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true); setError(''); setSuccess('');
+    try {
+      await API.addHarvest(formData);
+      setSuccess('Harvest recorded successfully!');
+      setFormData(actorIdFieldName && actorId ? { [actorIdFieldName]: actorId } : {});
+    } catch (err) {
+      setError(err?.message || err?.response?.data?.message || 'Failed to submit data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="max-w-4xl mx-auto p-6">
       <div className="bg-white rounded-2xl shadow-xl p-8">
+
+        {/* Header */}
         <div className="mb-8">
-          <div className="flex items-center gap-4 mb-4">
-            {onBack && (
-              <button
-                onClick={onBack}
-                className="flex items-center gap-2 text-gray-600 hover:text-gray-800 transition-colors duration-200"
-              >
-                <ArrowLeft size={20} />
-                Back to Dashboard
-              </button>
-            )}
-          </div>
+          {onBack && (
+            <button onClick={onBack} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
+              <ArrowLeft size={20} /> Back to Dashboard
+            </button>
+          )}
           <div className={`bg-gradient-to-r from-${stageColor}-600 to-${stageColor}-700 p-4 rounded-xl`}>
-            <h1 className="text-3xl font-bold text-white mb-2">
-              {stageConfig.title}
-            </h1>
-            <p className="text-white/90">
-              {stageConfig.description}
-            </p>
+            <h1 className="text-3xl font-bold text-white mb-1">{stageTitle}</h1>
+            <p className="text-white/90">{stageDesc}</p>
           </div>
         </div>
 
+        {/* Alerts */}
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6 flex items-center gap-2">
-            <AlertCircle size={20} />
-            {error}
+            <AlertCircle size={20} />{error}
           </div>
         )}
-
         {success && (
           <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-6 flex items-center gap-2">
-            <CheckCircle size={20} />
-            {success}
+            <CheckCircle size={20} />{success}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Special handling for processing stage: Farmer and Batch dropdowns */}
-            {stageUser?.stage === 'processing' && (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Select Farmer <span className="text-red-500 ml-1">*</span>
-                  </label>
-                  <select
-                    value={selectedFarmer}
-                    onChange={handleFarmerChange}
-                    className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-${stageColor}-500 focus:border-transparent transition-all duration-200`}
-                    required
-                    disabled={loadingFarmers}
-                  >
-                    <option value="">{loadingFarmers ? 'Loading farmers...' : 'Select Farmer'}</option>
-                    {farmers.map((farmer) => {
-                      // Ensure farmer is a string (defensive check)
-                      const farmerId = typeof farmer === 'string' ? farmer : String(farmer || '');
-                      return (
-                        <option key={farmerId} value={farmerId}>
-                          {farmerId}
-                        </option>
-                      );
-                    })}
+        {/* ── FARMER ──────────────────────────────────────────────────────── */}
+        {stageUser?.stage === 'farmer' && (
+          <form onSubmit={handleFarmerSubmit} className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <FormField label="Farmer ID" required>
+                <input name="farmer_id" value={formData.farmer_id || ''} onChange={handleFormChange} className={`${inputClass} bg-gray-50`} readOnly />
+              </FormField>
+              <FormField label="Product Name" required>
+                <input name="product_name" value={formData.product_name || ''} onChange={handleFormChange} className={inputClass} required placeholder="e.g. Turmeric" />
+              </FormField>
+              <FormField label="Batch ID" required>
+                <input name="batch_id" value={formData.batch_id || ''} onChange={handleFormChange} className={inputClass} required placeholder="e.g. B001" />
+              </FormField>
+              <FormField label="Quantity (grams)" required>
+                <input name="quantity_gm" type="number" value={formData.quantity_gm || ''} onChange={handleFormChange} className={inputClass} required placeholder="e.g. 750" />
+              </FormField>
+              <FormField label="Harvest Date" required>
+                <input name="harvest_date" type="date" value={formData.harvest_date || ''} onChange={handleFormChange} className={inputClass} required />
+              </FormField>
+              <FormField label="Fertilizer Used">
+                <input name="fertilizer" value={formData.fertilizer || ''} onChange={handleFormChange} className={inputClass} placeholder="e.g. Organic compost" />
+              </FormField>
+              <FormField label="Organic Status" required>
+                <select name="organic_status" value={formData.organic_status || ''} onChange={handleFormChange} className={selectClass} required>
+                  <option value="">Select status</option>
+                  <option value="Organic">Organic</option>
+                  <option value="Non-Organic">Non-Organic</option>
+                </select>
+              </FormField>
+              <div className="md:col-span-2">
+                <FormField label="GPS Coordinates" required>
+                  <GpsInput
+                    value={formData.gps_coordinates}
+                    onChange={handleFormChange}
+                    onFetch={() => fetchLocation('form', 'gps_coordinates')}
+                    fetching={geoStatus.fetching}
+                  />
+                </FormField>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button type="submit" disabled={loading}
+                className="bg-green-600 text-white px-8 py-3 rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 flex items-center gap-2">
+                {loading ? <><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />Submitting...</> : <><Save size={20} />Submit Harvest</>}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* ── PROCESSING ──────────────────────────────────────────────────── */}
+        {stageUser?.stage === 'processing' && (
+          <form onSubmit={handleCreatePacketsSubmit} className="space-y-6">
+
+            {/* Batch Selection */}
+            <div className="p-5 border-2 border-blue-200 rounded-xl bg-blue-50/40">
+              <h2 className="text-lg font-bold text-gray-800 mb-4">Batch Selection</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField label="Select Farmer" required>
+                  <select value={selectedFarmer} onChange={e => setSelectedFarmer(e.target.value)} className={selectClass} required disabled={loadingFarmers}>
+                    <option value="">{loadingFarmers ? 'Loading...' : 'Select Farmer'}</option>
+                    {farmers.map(f => { const id = typeof f === 'string' ? f : String(f || ''); return <option key={id} value={id}>{id}</option>; })}
                   </select>
+                </FormField>
+                <FormField label="Select Batch ID" required>
+                  <select value={selectedBatch} onChange={e => setSelectedBatch(e.target.value)} className={selectClass} required disabled={!selectedFarmer || loadingBatches}>
+                    <option value="">{!selectedFarmer ? 'Select farmer first' : loadingBatches ? 'Loading...' : batches.length === 0 ? 'No batches' : 'Select Batch'}</option>
+                    {batches.map(b => <option key={b.batchId} value={b.batchId}>{b.batchId} {b.availableGm != null ? `(${b.availableGm}gm avail)` : ''}</option>)}
+                  </select>
+                </FormField>
+              </div>
+              {selectedBatch && (
+                <div className="mt-3 p-3 bg-white rounded-lg border border-blue-200 text-sm text-gray-700">
+                  Available quantity (after 8% processing loss):{' '}
+                  <strong>{loadingBatchInfo ? 'Loading...' : batchInfo?.availableGm != null ? `${batchInfo.availableGm} gm` : '—'}</strong>
                 </div>
-                
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Select Batch ID <span className="text-red-500 ml-1">*</span>
-                  </label>
-                  <div className="flex gap-2 items-start">
-                    <select
-                      value={selectedBatch}
-                      onChange={handleBatchChange}
-                      className={`flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-${stageColor}-500 focus:border-transparent transition-all duration-200`}
-                      required
-                      disabled={!selectedFarmer || loadingBatches}
-                    >
-                      <option value="">
-                        {!selectedFarmer 
-                          ? '👆 Select farmer first' 
-                          : loadingBatches 
-                          ? 'Loading batches...' 
-                          : batches.length === 0
-                          ? 'No batches found for this farmer'
-                          : 'Select Batch ID'}
-                      </option>
-                      {batches.map((batch) => (
-                        <option key={batch.batchId} value={batch.batchId}>
-                          {batch.batchId} {batch.productName ? `(${batch.productName})` : ''} {batch.harvestDate ? `- ${batch.harvestDate}` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  {selectedBatch && batchPacketCount !== null && (
-                    <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-blue-900">Packet Information</p>
-                          <p className="text-sm text-blue-700 mt-1">
-                            Total packets created: <span className="font-bold text-blue-900">{batchPacketCount.count}</span>
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-xs text-blue-600">Batch Status: {batchPacketCount.exists ? 'Active' : 'Unknown'}</p>
-                        </div>
-                      </div>
+              )}
+            </div>
+
+            {selectedBatch && (
+              <>
+                {/* Lab & Quality Testing */}
+                <div className="p-5 border border-gray-200 rounded-xl">
+                  <h2 className="text-lg font-bold text-gray-800 mb-4">Lab & Quality Testing</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="md:col-span-2">
+                      <FormField label="Processing GPS" required>
+                        <GpsInput
+                          value={formData.processing_gps}
+                          onChange={handleFormChange}
+                          onFetch={() => fetchLocation('form', 'processing_gps')}
+                          fetching={geoStatus.fetching}
+                        />
+                      </FormField>
                     </div>
-                  )}
+                    <FormField label="Grinding Facility Name" required>
+                      <input name="grinding_facility_name" type="text" value={formData.grinding_facility_name || ''} onChange={handleFormChange} className={inputClass} required placeholder="e.g. Sri Ram Grinding Unit" />
+                    </FormField>
+                    <FormField label="Moisture Content (%)" required>
+                      <input name="moisture_content" type="number" step="0.01" value={formData.moisture_content || ''} onChange={handleFormChange} className={inputClass} required placeholder="e.g. 8.5" />
+                    </FormField>
+                    <FormField label="Curcumin Content (%)" required>
+                      <input name="curcumin_content" type="number" step="0.01" value={formData.curcumin_content || ''} onChange={handleFormChange} className={inputClass} required placeholder="e.g. 3.2" />
+                    </FormField>
+                    <FormField label="Heavy Metals Check" required>
+                      <select name="heavy_metals" value={formData.heavy_metals || ''} onChange={handleFormChange} className={selectClass} required>
+                        <option value="">Select result</option>
+                        <option value="Pass">Pass</option>
+                        <option value="Fail">Fail</option>
+                      </select>
+                    </FormField>
+                    <FormField label="Physical Properties" required>
+                      <input name="physical_properties" type="text" value={formData.physical_properties || ''} onChange={handleFormChange} className={inputClass} required placeholder="e.g. Fine yellow powder" />
+                    </FormField>
+                  </div>
+                </div>
+
+                {/* Packaging Info */}
+                <div className="p-5 border border-gray-200 rounded-xl">
+                  <h2 className="text-lg font-bold text-gray-800 mb-4">Packaging Information</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField label="Packaging Date" required>
+                      <input name="packaging_date" type="date" value={formData.packaging_date || ''} onChange={handleFormChange} className={inputClass} required />
+                    </FormField>
+                    <FormField label="Expiry Date" required>
+                      <input name="expiry_date" type="date" value={formData.expiry_date || ''} onChange={handleFormChange} className={inputClass} required />
+                    </FormField>
+                    <FormField label="Sending Box Code" required>
+                      <input name="sending_box_code" type="text" value={formData.sending_box_code || ''} onChange={handleFormChange} className={inputClass} required placeholder="e.g. BOX-001" />
+                    </FormField>
+                    <FormField label="Distributor ID" required>
+                      <input name="distributor_id" type="text" value={formData.distributor_id || ''} onChange={handleFormChange} className={inputClass} required placeholder="e.g. dist1" />
+                    </FormField>
+                  </div>
+                </div>
+
+                {/* Packet Creation */}
+                <div className="p-5 border-2 border-blue-300 rounded-xl bg-blue-50/40">
+                  <h2 className="text-lg font-bold text-gray-800 mb-4">Create Packets</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                    <FormField label="Packet size (gm)" required>
+                      <select value={packetSizeGm} onChange={e => setPacketSizeGm(e.target.value)} className={selectClass} required>
+                        <option value="">Select size</option>
+                        {[50, 100, 250, 500].map(g => <option key={g} value={g}>{g} gm</option>)}
+                      </select>
+                    </FormField>
+                    <div>
+                      <p className="text-sm font-medium text-gray-700 mb-1">Max packets (for this size)</p>
+                      <p className="py-2 text-gray-800 font-semibold">{loadingBatchInfo ? '...' : batchInfo?.maxPackets != null ? batchInfo.maxPackets : '—'}</p>
+                    </div>
+                    <FormField label="Number of packets to create" required>
+                      <input type="number" min={1} max={batchInfo?.maxPackets ?? 0} value={createPacketCount}
+                        onChange={e => setCreatePacketCount(e.target.value)} className={inputClass} required placeholder="e.g. 5" />
+                    </FormField>
+                  </div>
+                  <p className="mt-2 text-xs text-gray-500">Packet IDs format: FarmerId-BatchId-{packetSizeGm || '50'}g-001, 002, ...</p>
+                </div>
+
+                <div className="flex justify-end">
+                  <button type="submit" disabled={loading || loadingBatchInfo || (batchInfo?.maxPackets ?? 0) < 1}
+                    className="bg-blue-600 text-white px-8 py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+                    {loading ? <><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />Creating...</> : <><Save size={20} />Create Packets</>}
+                  </button>
                 </div>
               </>
             )}
-            
-            {stageConfig.fields.map((field) => (
-              <div key={field.name} className={field.name.includes('gps') || field.name.includes('properties') ? 'md:col-span-2' : ''}>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {field.label}
-                  {field.required && <span className="text-red-500 ml-1">*</span>}
-                </label>
-                
-                {field.type === 'select' ? (
-                  <select
-                    name={field.name}
-                    value={formData[field.name] || ''}
-                    onChange={handleInputChange}
-                    className={`w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-${stageColor}-500 focus:border-transparent transition-all duration-200`}
-                    required={field.required}
-                  >
-                    <option value="">Select {field.label}</option>
-                    {field.options.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="flex flex-col gap-1">
-                    <div className="flex gap-2 items-center">
-                      <input
-                        type={field.type}
-                        name={field.name}
-                        value={formData[field.name] || ''}
-                        onChange={handleInputChange}
-                        placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
-                        className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-${stageColor}-500 focus:border-transparent transition-all duration-200 ${
-                          (field.name.includes('gps') || field.name === actorIdFieldName) ? 'bg-gray-50 border-gray-300' : 
-                          field.name === 'packet_id' && packetValidation.status === 'error' ? 'border-red-500 bg-red-50' :
-                          field.name === 'packet_id' && packetValidation.status === 'success' ? 'border-green-500 bg-green-50' :
-                          'border-gray-300'
-                        }`}
-                        required={field.required}
-                        readOnly={field.name.includes('gps') || field.name === actorIdFieldName}
-                      />
-                      {field.name.includes('gps') && (
-                        <button
-                          type="button"
-                          onClick={fetchLocation}
-                          title="Use current location"
-                          className={`shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 focus:ring-2 focus:ring-${stageColor}-500`}
-                          disabled={geoStatus.fetching}
-                        >
-                          {geoStatus.fetching ? (
-                            <RefreshCw className="animate-spin" size={16} />
-                          ) : (
-                            <MapPin size={16} />
-                          )}
-                          <span className="hidden md:inline">{geoStatus.fetching ? 'Locating...' : 'Use GPS'}</span>
-                        </button>
-                      )}
-                    </div>
-                    {/* Packet ID validation feedback */}
-                    {field.name === 'packet_id' && packetValidation.status && packetValidation.message && (
-                      <div className={`text-sm px-2 py-1 rounded flex items-center gap-1 ${
-                        packetValidation.status === 'error' ? 'text-red-700 bg-red-50' : 
-                        packetValidation.status === 'success' ? 'text-green-700 bg-green-50' : 
-                        ''
-                      }`}>
-                        {packetValidation.status === 'success' && <CheckCircle size={14} />}
-                        {packetValidation.status === 'error' && <AlertCircle size={14} />}
-                        <span>{packetValidation.message}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {gpsFieldNames.length > 0 && geoStatus.error && (
-            <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg mt-2">
-              {geoStatus.error}. Please allow location access or click "Use GPS" to retry.
-            </div>
-          )}
-
-          <div className="flex justify-end pt-6">
-            <button
-              type="submit"
-              disabled={loading}
-              className={`bg-gradient-to-r from-${stageColor}-600 to-${stageColor}-700 text-white px-8 py-3 rounded-lg font-medium hover:from-${stageColor}-700 hover:to-${stageColor}-800 focus:ring-4 focus:ring-${stageColor}-300 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2`}
-            >
-              {loading ? (
-                <>
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                  Submitting...
-                </>
-              ) : (
-                <>
-                  <Save size={20} />
-                  Submit Data
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-        {/* QR Output - only shows after processing submit with packetId */}
-        {qrDataUrl && stageUser?.stage === 'processing' && (
-          <div className="mt-8 border border-gray-200 rounded-xl p-6 bg-gray-50">
-            <h3 className="text-xl font-bold text-gray-800 mb-2">Packet Tracking QR</h3>
-            <p className="text-gray-600 mb-4">Scan to open tracking page for this packet.</p>
-            <div className="flex flex-col md:flex-row items-center gap-6">
-              <img src={qrDataUrl} alt="Tracking QR" className="w-56 h-56 border bg-white p-2 rounded-lg" />
-              <div className="flex flex-col gap-2 w-full md:w-auto">
-                <a
-                  href={qrDataUrl}
-                  download={`packet-tracking-qr.png`}
-                  className="inline-block text-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  Download QR PNG
-                </a>
-                <button
-                  onClick={() => {
-                    const w = window.open('');
-                    if (!w) return;
-                    w.document.write(`<img src="${qrDataUrl}" style="width:320px;height:320px;" />`);
-                    w.document.close();
-                    w.focus();
-                    w.print();
-                  }}
-                  className="inline-block text-center px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900"
-                >
-                  Print QR
-                </button>
-              </div>
-            </div>
-            <p className="text-xs text-gray-500 mt-3">Embed this QR on the packet. It encodes the public tracking URL.</p>
-          </div>
+          </form>
         )}
+
+        {/* ── DISTRIBUTOR / SUPPLIER / SHOPKEEPER ─────────────────────────── */}
+        {['distributor', 'supplier', 'shopkeeper'].includes(stageUser?.stage) && (
+          <form onSubmit={handleReceiveSubmit} className="space-y-6">
+
+            {/* Batch Selection */}
+            <div className="p-5 border-2 border-purple-200 rounded-xl bg-purple-50/40">
+              <h2 className="text-lg font-bold text-gray-800 mb-4">Select Batch</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField label="Select Farmer" required>
+                  <select value={selectedFarmer} onChange={e => setSelectedFarmer(e.target.value)} className={selectClass} required disabled={loadingFarmers}>
+                    <option value="">{loadingFarmers ? 'Loading...' : 'Select Farmer'}</option>
+                    {farmers.map(f => { const id = typeof f === 'string' ? f : String(f || ''); return <option key={id} value={id}>{id}</option>; })}
+                  </select>
+                </FormField>
+                <FormField label="Select Batch ID" required>
+                  <select value={selectedBatch} onChange={e => setSelectedBatch(e.target.value)} className={selectClass} required disabled={!selectedFarmer || loadingBatches}>
+                    <option value="">{!selectedFarmer ? 'Select farmer first' : loadingBatches ? 'Loading...' : batches.length === 0 ? 'No batches' : 'Select Batch'}</option>
+                    {batches.map(b => <option key={b.batchId} value={b.batchId}>{b.batchId}</option>)}
+                  </select>
+                </FormField>
+              </div>
+              {selectedBatch && (
+                <div className="mt-3 p-3 bg-white rounded-lg border border-purple-200 text-sm text-gray-700">
+                  Packets available at <strong>{previousStage}</strong>:{' '}
+                  <strong>{loadingPacketsByStage ? 'Loading...' : packetsAtStage.count ?? 0}</strong>
+                </div>
+              )}
+            </div>
+
+            {selectedBatch && (
+              <>
+                {/* Stage-specific fields */}
+                <div className="p-5 border border-gray-200 rounded-xl">
+                  <h2 className="text-lg font-bold text-gray-800 mb-4">
+                    {stageUser?.stage === 'distributor' && 'Distribution Details'}
+                    {stageUser?.stage === 'supplier' && 'Supply Details'}
+                    {stageUser?.stage === 'shopkeeper' && 'Receipt Details'}
+                  </h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                    {stageUser?.stage === 'distributor' && (<>
+                      <FormField label="Distributor ID" required>
+                        <input name="distributor_id" value={receiveFormData.distributor_id ?? actorId} onChange={handleReceiveChange} className={`${inputClass} bg-gray-50`} readOnly />
+                      </FormField>
+                      <FormField label="GPS Coordinates" required>
+                        <GpsInput value={receiveFormData.gps_coordinates} onChange={handleReceiveChange} onFetch={() => fetchLocation('receive')} fetching={geoStatus.fetching} />
+                      </FormField>
+                      <FormField label="Received Box Code" required>
+                        <input name="received_box_code" value={receiveFormData.received_box_code || ''} onChange={handleReceiveChange} className={inputClass} required placeholder="e.g. BOX-001" />
+                      </FormField>
+                      <FormField label="Dispatch Date" required>
+                        <input name="dispatch_date" type="date" value={receiveFormData.dispatch_date || ''} onChange={handleReceiveChange} className={inputClass} required />
+                      </FormField>
+                      <FormField label="Sending Box Code" required>
+                        <input name="sending_box_code" value={receiveFormData.sending_box_code || ''} onChange={handleReceiveChange} className={inputClass} required placeholder="e.g. BOX-002" />
+                      </FormField>
+                      <FormField label="Supplier ID" required>
+                        <input name="supplier_id" value={receiveFormData.supplier_id || ''} onChange={handleReceiveChange} className={inputClass} required placeholder="e.g. supplier1" />
+                      </FormField>
+                    </>)}
+
+                    {stageUser?.stage === 'supplier' && (<>
+                      <FormField label="Supplier ID" required>
+                        <input name="supplier_id" value={receiveFormData.supplier_id ?? actorId} onChange={handleReceiveChange} className={`${inputClass} bg-gray-50`} readOnly />
+                      </FormField>
+                      <FormField label="Received Box Code" required>
+                        <input name="received_box_code" value={receiveFormData.received_box_code || ''} onChange={handleReceiveChange} className={inputClass} required placeholder="e.g. BOX-001" />
+                      </FormField>
+                      <FormField label="GPS Coordinates" required>
+                        <GpsInput value={receiveFormData.gps_coordinates} onChange={handleReceiveChange} onFetch={() => fetchLocation('receive')} fetching={geoStatus.fetching} />
+                      </FormField>
+                      <FormField label="Receipt Date" required>
+                        <input name="receipt_date" type="date" value={receiveFormData.receipt_date || ''} onChange={handleReceiveChange} className={inputClass} required />
+                      </FormField>
+                      <FormField label="Shopkeeper ID" required>
+                        <input name="shopkeeper_id" value={receiveFormData.shopkeeper_id || ''} onChange={handleReceiveChange} className={inputClass} required placeholder="e.g. shop1" />
+                      </FormField>
+                    </>)}
+
+                    {stageUser?.stage === 'shopkeeper' && (<>
+                      <FormField label="Shopkeeper ID" required>
+                        <input name="shopkeeper_id" value={receiveFormData.shopkeeper_id ?? actorId} onChange={handleReceiveChange} className={`${inputClass} bg-gray-50`} readOnly />
+                      </FormField>
+                      <FormField label="GPS Coordinates" required>
+                        <GpsInput value={receiveFormData.gps_coordinates} onChange={handleReceiveChange} onFetch={() => fetchLocation('receive')} fetching={geoStatus.fetching} />
+                      </FormField>
+                      <FormField label="Date Received" required>
+                        <input name="date_received" type="date" value={receiveFormData.date_received || ''} onChange={handleReceiveChange} className={inputClass} required />
+                      </FormField>
+                    </>)}
+
+                  </div>
+                </div>
+
+                {/* Packet count */}
+                <div className="p-5 border-2 border-purple-300 rounded-xl bg-purple-50/40">
+                  <h2 className="text-lg font-bold text-gray-800 mb-3">Receive Packets</h2>
+                  <FormField label="Number of packets to receive" required>
+                    <input type="number" min={1} max={packetsAtStage.count || 0} value={receiveCount}
+                      onChange={e => setReceiveCount(e.target.value)}
+                      className="w-full max-w-xs px-4 py-2 border border-gray-300 rounded-lg"
+                      required placeholder="e.g. 5" />
+                  </FormField>
+                </div>
+
+                <div className="flex justify-end">
+                  <button type="submit" disabled={loading || loadingPacketsByStage || (packetsAtStage.count || 0) < 1}
+                    className={`bg-gradient-to-r from-${stageColor}-600 to-${stageColor}-700 text-white px-8 py-3 rounded-lg font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-2`}>
+                    {loading ? <><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />Submitting...</> : <><Save size={20} />Receive Packets</>}
+                  </button>
+                </div>
+              </>
+            )}
+          </form>
+        )}
+
       </div>
     </div>
   );

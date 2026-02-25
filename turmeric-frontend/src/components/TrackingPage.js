@@ -299,6 +299,43 @@ useEffect(() => {
             </div>
           </div>
 
+          {/* Supply chain path: which Distributor, Supplier, Shopkeeper this packet reached */}
+          {(journeyData.distributor || journeyData.supplier || journeyData.shopkeeper) && (
+            <div className="bg-white rounded-xl shadow-lg p-6 border-2 border-indigo-200">
+              <h2 className="text-xl font-bold text-gray-900 mb-4">Supply Chain Path</h2>
+              <p className="text-gray-600 mb-4">This packet reached the following parties in the chain:</p>
+              <div className="space-y-3">
+                {journeyData.distributor?.distributor_id && (
+                  <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                    <Truck className="w-5 h-5 text-indigo-600" />
+                    <span className="font-semibold text-gray-700">Distributor:</span>
+                    <span className="font-bold text-indigo-700">{journeyData.distributor.distributor_id}</span>
+                    {journeyData.distributor.supplier_id && (
+                      <span className="text-gray-500 text-sm">→ sent to Supplier: {journeyData.distributor.supplier_id}</span>
+                    )}
+                  </div>
+                )}
+                {journeyData.supplier?.supplier_id && (
+                  <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                    <Store className="w-5 h-5 text-amber-600" />
+                    <span className="font-semibold text-gray-700">Supplier:</span>
+                    <span className="font-bold text-amber-700">{journeyData.supplier.supplier_id}</span>
+                    {journeyData.supplier.shopkeeper_id && (
+                      <span className="text-gray-500 text-sm">→ sent to Shopkeeper: {journeyData.supplier.shopkeeper_id}</span>
+                    )}
+                  </div>
+                )}
+                {journeyData.shopkeeper?.shopkeeper_id && (
+                  <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                    <ShoppingBag className="w-5 h-5 text-blue-600" />
+                    <span className="font-semibold text-gray-700">Shopkeeper (Retail):</span>
+                    <span className="font-bold text-blue-700">{journeyData.shopkeeper.shopkeeper_id}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Timeline */}
           <div className="bg-white rounded-xl shadow-lg p-6">
             <h2 className="text-2xl font-bold text-gray-900 mb-6">Supply Chain Timeline</h2>

@@ -24,7 +24,10 @@ function getContract() {
   const address = process.env.CONTRACT_ADDRESS;
   if (!address) throw new Error("CONTRACT_ADDRESS not set in environment");
 
-  const abiPath = path.resolve(__dirname, "TurmericSupplyChain.json"); // JSON is now next to this file
+  // Prefer Hardhat artifact (has latest ABI after compile); fallback to bundled JSON
+  const artifactPath = path.resolve(__dirname, "../../artifacts/contracts/TurmericSupplyChain.sol/TurmericSupplyChain.json");
+  const bundledPath = path.resolve(__dirname, "TurmericSupplyChain.json");
+  const abiPath = fs.existsSync(artifactPath) ? artifactPath : bundledPath;
   if (!fs.existsSync(abiPath)) throw new Error(`Contract JSON not found at ${abiPath}`);
 
   const json = JSON.parse(fs.readFileSync(abiPath, "utf8"));
