@@ -634,7 +634,8 @@ router.post("/batches/:batchId/create-packets", stageGuard('processing'), async 
     const packetIds = [];
     for (let i = 0; i < numCount; i++) {
       const seq = startIndex + i + 1;
-      const pid = `${farmerId}-${batchId}-${packetSizeGm}g-${String(seq).padStart(3, '0')}`;
+      const timestamp = String(Date.now());
+      const pid = `${farmerId}-${batchId}-${packetSizeGm}g-${String(seq).padStart(3, '0')}-${timestamp}`;
       packetIds.push(pid);
       await Packet.findOneAndUpdate(
         { packet_id: pid },
@@ -654,8 +655,8 @@ router.post("/batches/:batchId/create-packets", stageGuard('processing'), async 
       { new: true }
     );
     
-    console.log(`[create-packets] Created ${packetIds.length} packet(s) for batch ${batchId}:`);
-    packetIds.forEach((pid, i) => console.log(`  ${i + 1}. ${pid}`));
+    // console.log(`[create-packets] Created ${packetIds.length} packet(s) for batch ${batchId}:`);
+    // packetIds.forEach((pid, i) => console.log(`  ${i + 1}. ${pid}`));
 
     res.status(200).json({
       message: `Created ${numCount} packet(s) for batch ${batchId}.`,
