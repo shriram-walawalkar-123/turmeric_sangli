@@ -233,6 +233,22 @@ async function setBatchProcessing(batch_id, data, overrides = {}) {
   }
 }
 
+async function markPacketSold(packet_id, shopkeeper_id, overrides = {}) {
+  const c = getContract();
+  const nonce = await getNextNonce();
+  try {
+    return await c.markPacketSold(packet_id, shopkeeper_id, { nonce, ...overrides });
+  } catch (err) {
+    await resetNonce();
+    throw err;
+  }
+}
+
+async function isPacketSold(packet_id) {
+  const c = getContract();
+  return c.isPacketSold(packet_id);
+}
+
 // ── Read Functions (no nonce needed) ──────────────────────────────────────────
 
 async function getBatchProcessing(batch_id) {
@@ -510,9 +526,11 @@ module.exports = {
   addPacketsInBatch,
   createPackets,
   setBatchProcessing,
+  markPacketSold,
 
   // reads
   getBatchProcessing,
+  isPacketSold,
   getPacket,
   getHarvest,
   getProcessing,

@@ -26,12 +26,71 @@ const {
   getHarvestForBatch,
   getBatchProcessing,
   validatePacketForStage,
+  markPacketSold,
+  isPacketSold,
 } = require('./services/contractService');
-const { stageGuard } = require('./middleware/stageRole');
+const { stageGuard, stageGuardAny } = require('./middleware/stageRole');
 const BatchStock = require('./models/BatchStock');
 const Packet = require('./models/Packet');
+const { getProvider, getContract } = require('./config/blockchain');
+const { ethers } = require('ethers');
 
 const PROCESSING_LOSS_PERCENT = 8;
+
+// ---------------- On-chain packet queries (NO MongoDB) ----------------
+async function getPacketsForBatchFromChain(batchId) {
+  const contract = getContract();
+  const provider = getProvider();
+  const address = contract.target || contract.address;
+  const iface = contract.interface;
+
+  const topicRegistered = iface.getEvent('PacketRegisteredPlain').topicHash;
+  const topicStageUpdated = iface.getEvent('PacketStageUpdated').topicHash;
+
+  // 1) Find all PacketRegistered events, then filter by batchId
+  const regLogs = await provider.getLogs({
+    address,
+    topics: [topicRegistered],
+    fromBlock: 0,
+    toBlock: 'latest',
+  });
+
+  const packets = new Map(); // packetId -> { batchId, stage }
+  for (const log of regLogs) {
+    try {
+      const parsed = iface.parseLog({ topics: log.topics, data: log.data });
+      const pid = String(parsed.args?.unique_packet_id ?? parsed.args?.[0] ?? '');
+      const bId = String(parsed.args?.batch_id ?? parsed.args?.[1] ?? '');
+      const stage = String(parsed.args?.current_stage ?? parsed.args?.[2] ?? '');
+      if (bId === batchId && pid) {
+        packets.set(pid, { batchId: bId, stage });
+      }
+    } catch (_) {}
+  }
+
+  if (packets.size === 0) return [];
+
+  // 2) Apply stage updates (for our packet IDs only)
+  const topicStageUpdatedPlain = iface.getEvent('PacketStageUpdatedPlain').topicHash;
+  const stageLogs = await provider.getLogs({ address, topics: [topicStageUpdatedPlain], fromBlock: 0, toBlock: 'latest' });
+  for (const log of stageLogs) {
+    try {
+      const parsed = iface.parseLog({ topics: log.topics, data: log.data });
+      const pid = String(parsed.args?.unique_packet_id ?? parsed.args?.[0] ?? '');
+      const newStage = String(parsed.args?.new_stage ?? parsed.args?.[2] ?? '');
+      if (packets.has(pid) && newStage) {
+        packets.set(pid, { batchId, stage: newStage });
+      }
+    } catch (_) {}
+  }
+
+  return Array.from(packets.entries()).map(([packet_id, v]) => ({ packet_id, batch_id: v.batchId, current_stage: v.stage }));
+}
+
+async function getPacketIdsByBatchAndStageFromChain(batchId, stage) {
+  const all = await getPacketsForBatchFromChain(batchId);
+  return all.filter((p) => p.current_stage === stage).map((p) => p.packet_id).sort();
+}
 
 function requireFields(obj, fields) {
   const missing = fields.filter((f) => obj[f] === undefined || obj[f] === null || obj[f] === "");
@@ -162,11 +221,9 @@ router.post("/distributor/receive", stageGuard('distributor'), async (req, res) 
     if (numCount === 0) {
       return res.status(400).json({ error: "Count must be at least 1." });
     }
-    const packetsAtProcessing = await Packet.find({ batch_id, current_stage: 'processing' }).sort({ packet_id: 1 }).limit(numCount).lean();
-    if (packetsAtProcessing.length < numCount) {
-      return res.status(400).json({ error: `Only ${packetsAtProcessing.length} packet(s) available at processing for this batch. Requested: ${numCount}.` });
-    }
-    const ids = packetsAtProcessing.map((p) => p.packet_id);
+    const available = await getPacketIdsByBatchAndStageFromChain(batch_id, 'processing');
+    const ids = available.slice(0, numCount);
+    if (ids.length < numCount) return res.status(400).json({ error: `Only ${ids.length} packet(s) available at processing for this batch. Requested: ${numCount}.` });
 
     console.log(`[distributor/receive] Processing ${ids.length} packet(s) for batch ${batch_id}:`);
 
@@ -190,7 +247,6 @@ router.post("/distributor/receive", stageGuard('distributor'), async (req, res) 
         supplier_id: req.body.supplier_id,
       });
       await tx.wait();
-      await Packet.updateOne({ packet_id }, { current_stage: 'distributor' });
 
       console.log(`  [${i + 1}/${ids.length}] SUCCESS: ${packet_id} → distributor (txHash: ${tx.hash})`);
     }
@@ -234,11 +290,9 @@ router.post("/supplier/receive", stageGuard('supplier'), async (req, res) => {
     if (numCount === 0) {
       return res.status(400).json({ error: "Count must be at least 1." });
     }
-    const packetsAtDistributor = await Packet.find({ batch_id, current_stage: 'distributor' }).sort({ packet_id: 1 }).limit(numCount).lean();
-    if (packetsAtDistributor.length < numCount) {
-      return res.status(400).json({ error: `Only ${packetsAtDistributor.length} packet(s) available at distributor for this batch. Requested: ${numCount}.` });
-    }
-    const ids = packetsAtDistributor.map((p) => p.packet_id);
+    const available = await getPacketIdsByBatchAndStageFromChain(batch_id, 'distributor');
+    const ids = available.slice(0, numCount);
+    if (ids.length < numCount) return res.status(400).json({ error: `Only ${ids.length} packet(s) available at distributor for this batch. Requested: ${numCount}.` });
 
     console.log(`[supplier/receive] Processing ${ids.length} packet(s) for batch ${batch_id}:`);
 
@@ -261,7 +315,6 @@ router.post("/supplier/receive", stageGuard('supplier'), async (req, res) => {
         shopkeeper_id: req.body.shopkeeper_id,
       });
       await tx.wait();
-      await Packet.updateOne({ packet_id }, { current_stage: 'supplier' });
 
       console.log(`  [${i + 1}/${ids.length}] SUCCESS: ${packet_id} → supplier (txHash: ${tx.hash})`);
     }
@@ -305,11 +358,9 @@ router.post("/shopkeeper/receive", stageGuard('shopkeeper'), async (req, res) =>
     if (numCount === 0) {
       return res.status(400).json({ error: "Count must be at least 1." });
     }
-    const packetsAtSupplier = await Packet.find({ batch_id, current_stage: 'supplier' }).sort({ packet_id: 1 }).limit(numCount).lean();
-    if (packetsAtSupplier.length < numCount) {
-      return res.status(400).json({ error: `Only ${packetsAtSupplier.length} packet(s) available at supplier for this batch. Requested: ${numCount}.` });
-    }
-    const ids = packetsAtSupplier.map((p) => p.packet_id);
+    const available = await getPacketIdsByBatchAndStageFromChain(batch_id, 'supplier');
+    const ids = available.slice(0, numCount);
+    if (ids.length < numCount) return res.status(400).json({ error: `Only ${ids.length} packet(s) available at supplier for this batch. Requested: ${numCount}.` });
 
     console.log(`[shopkeeper/receive] Processing ${ids.length} packet(s) for batch ${batch_id}:`);
 
@@ -330,7 +381,6 @@ router.post("/shopkeeper/receive", stageGuard('shopkeeper'), async (req, res) =>
         date_received: req.body.date_received,
       });
       await tx.wait();
-      await Packet.updateOne({ packet_id }, { current_stage: 'shopkeeper' });
 
       console.log(`  [${i + 1}/${ids.length}] SUCCESS: ${packet_id} → shopkeeper (txHash: ${tx.hash})`);
     }
@@ -466,6 +516,17 @@ router.get("/farmers", async (req, res) => {
   }
 });
 
+// Get all batches (flattened from on-chain HarvestRecorded events)
+router.get("/batches", async (req, res) => {
+  try {
+    const farmerMap = await getAllFarmersAndBatches();
+    const batchIds = Array.from(new Set(Object.values(farmerMap || {}).flat()));
+    res.status(200).json({ batches: batchIds });
+  } catch (error) {
+    res.status(500).json({ error: error.message || String(error) });
+  }
+});
+
 // Get batches for a farmer (includes packet count and available quantity from BatchStock)
 router.get("/farmers/:farmerId/batches", async (req, res) => {
   try {
@@ -522,6 +583,43 @@ router.get("/batches/:batchId/packet-count", async (req, res) => {
     res.status(500).json({ error: error.message || String(error) });
   }
 });
+
+// Cleanup invalid packet IDs in MongoDB (IDs that don't exist on-chain).
+// This is mainly for older data where packet_id was generated off-chain with millisecond timestamps.
+router.post(
+  "/batches/:batchId/cleanup-invalid-packets",
+  stageGuardAny(['processing', 'distributor', 'supplier', 'shopkeeper']),
+  async (req, res) => {
+    try {
+      const { batchId } = req.params;
+      const mode = String(req.query.mode || 'ms'); // ms | onchain
+
+      let deleted = 0;
+
+      if (mode === 'ms') {
+        // Old bad format: ends with "-<13 digits>" (Date.now() ms)
+        const result = await Packet.deleteMany({ batch_id: batchId, packet_id: /-\d{13}$/ });
+        deleted = result?.deletedCount || 0;
+      } else if (mode === 'onchain') {
+        // Strong cleanup: check every packet in this batch against chain
+        const list = await Packet.find({ batch_id: batchId }).select('packet_id').lean();
+        for (const p of list) {
+          const exists = await packetIdExists(p.packet_id);
+          if (!exists) {
+            const r = await Packet.deleteOne({ packet_id: p.packet_id });
+            deleted += r?.deletedCount || 0;
+          }
+        }
+      } else {
+        return res.status(400).json({ error: "Invalid mode. Use ms|onchain." });
+      }
+
+      res.status(200).json({ message: "Cleanup completed.", batchId, deleted, mode });
+    } catch (error) {
+      res.status(500).json({ error: error.message || String(error) });
+    }
+  }
+);
 
 // Ensure BatchStock exists for batch (create from harvest.quantity_gm if missing)
 async function ensureBatchStock(batchId) {
@@ -630,18 +728,41 @@ router.post("/batches/:batchId/create-packets", stageGuard('processing'), async 
     const rawCount = await getBatchPacketCount(batchId);
     const startIndex = Number(rawCount ?? 0);
     const tx = await createPackets(batchId, farmerId, numCount, packetSizeGm);
-    await tx.wait();
+    const receipt = await tx.wait();
+
+    // IMPORTANT: DO NOT store packet IDs in MongoDB.
+    // Return packet IDs from on-chain PacketRegistered events.
+    const contract = getContract();
+    const contractAddress = (contract.target || contract.address || '').toLowerCase();
+    const iface = contract.interface;
+    const topicRegistered = iface.getEvent('PacketRegisteredPlain').topicHash;
     const packetIds = [];
-    for (let i = 0; i < numCount; i++) {
-      const seq = startIndex + i + 1;
-      const timestamp = String(Date.now());
-      const pid = `${farmerId}-${batchId}-${packetSizeGm}g-${String(seq).padStart(3, '0')}-${timestamp}`;
-      packetIds.push(pid);
-      await Packet.findOneAndUpdate(
-        { packet_id: pid },
-        { packet_id: pid, batch_id: batchId, farmer_id: farmerId, packet_size_gm: packetSizeGm, current_stage: 'processing' },
-        { upsert: true, new: true }
+    const receiptLogs = (receipt.logs || []).filter((l) => {
+      const addrOk = !contractAddress || String(l.address || '').toLowerCase() === contractAddress;
+      const topicOk = l.topics?.[0] === topicRegistered;
+      return addrOk && topicOk;
+    });
+    for (const log of receiptLogs) {
+      try {
+        const parsed = iface.parseLog({ topics: log.topics, data: log.data });
+        const pid = String(parsed.args?.unique_packet_id ?? parsed.args?.[0] ?? '');
+        const bId = String(parsed.args?.batch_id ?? parsed.args?.[1] ?? '');
+        const stage = String(parsed.args?.current_stage ?? parsed.args?.[2] ?? '');
+        if (pid && bId === batchId && stage === 'processing') packetIds.push(pid);
+      } catch (_) {}
+    }
+
+    if (packetIds.length !== numCount) {
+      console.warn(
+        `[create-packets] Expected ${numCount} PacketRegistered events for batch ${batchId}, got ${packetIds.length}.`,
+        { txHash: receipt.hash, startIndex }
       );
+    }
+
+    if (packetIds.length === 0) {
+      return res.status(500).json({
+        error: "Packets were created on-chain, but backend could not read PacketRegistered events for this tx. Ensure CONTRACT_ADDRESS + ABI match the deployed contract.",
+      });
     }
 
     console.log("Printing packets id : ");
@@ -651,7 +772,7 @@ router.post("/batches/:batchId/create-packets", stageGuard('processing'), async 
     const usedGmToAdd = numCount * packetSizeGm;
     await BatchStock.findOneAndUpdate(
       { batch_id: batchId },
-      { $inc: { used_gm: usedGmToAdd }, $push: { packet_ids: { $each: packetIds } }, packet_size_gm: packetSizeGm },
+      { $inc: { used_gm: usedGmToAdd }, packet_size_gm: packetSizeGm },
       { new: true }
     );
     
@@ -677,11 +798,87 @@ router.get("/batches/:batchId/packets-by-stage", async (req, res) => {
     if (!validStages.includes(stage)) {
       return res.status(400).json({ error: "Invalid stage." });
     }
-    const list = await Packet.find({ batch_id: batchId, current_stage: stage }).select('packet_id current_stage').lean();
-    console.log("packets list is :",list);
-    res.status(200).json({ batchId, stage, count: list.length, packetIds: list.map((p) => p.packet_id) });
+    const packetIds = await getPacketIdsByBatchAndStageFromChain(batchId, stage);
+    res.status(200).json({ batchId, stage, count: packetIds.length, packetIds });
   } catch (error) {
     res.status(500).json({ error: error.message || String(error) });
+  }
+});
+
+// ---------------- SHOPKEEPER: PACKETS INVENTORY + SALE (ON-CHAIN) ----------------
+
+async function getShopkeeperBatchInventoryFromChain(batchId) {
+  const ids = await getPacketIdsByBatchAndStageFromChain(batchId, 'shopkeeper');
+  const packets = [];
+  let sold = 0;
+  for (const packet_id of ids) {
+    const s = await isPacketSold(packet_id);
+    const is_sold = Boolean(s);
+    if (is_sold) sold += 1;
+    packets.push({ packet_id, is_sold, sold_at: null, sold_tx_hash: '' });
+  }
+  const total = ids.length;
+  const unsold = Math.max(0, total - sold);
+  return { packets, counts: { total, sold, unsold } };
+}
+
+// List packets at shopkeeper for a batch, with sold/unsold filter (no MongoDB)
+router.get("/shopkeeper/batches/:batchId/packets", stageGuard('shopkeeper'), async (req, res) => {
+  try {
+    const { batchId } = req.params;
+    const status = String(req.query.status || 'all'); // all | sold | unsold
+    if (!['all', 'sold', 'unsold'].includes(status)) {
+      return res.status(400).json({ error: "Invalid status filter. Use all|sold|unsold." });
+    }
+
+    const inv = await getShopkeeperBatchInventoryFromChain(batchId);
+    const filtered =
+      status === 'sold' ? inv.packets.filter((p) => p.is_sold) :
+      status === 'unsold' ? inv.packets.filter((p) => !p.is_sold) :
+      inv.packets;
+
+    res.status(200).json({
+      batchId,
+      status,
+      counts: inv.counts,
+      packets: filtered,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || String(error) });
+  }
+});
+
+// Mark packet as sold (one-way, on-chain only)
+router.post("/shopkeeper/packets/:packetId/mark-sold", stageGuard('shopkeeper'), async (req, res) => {
+  try {
+    const { packetId } = req.params;
+    const shopkeeperId = req.body.shopkeeper_id || req.stageUser?.id || '';
+    if (!shopkeeperId) return res.status(400).json({ error: "Missing shopkeeper_id." });
+
+    // Ensure packet is valid for shopkeeper stage (exists on-chain, stage == shopkeeper, not already used in shopkeeper form)
+    // Here we just check sold flag and stage list.
+    const isSold = await isPacketSold(packetId);
+    if (Boolean(isSold)) return res.status(400).json({ error: "Packet is already marked as sold." });
+
+    const tx = await markPacketSold(packetId, shopkeeperId);
+    const receipt = await tx.wait();
+
+    // Derive batchId from the packet itself
+    const packetRaw = await getPacket(packetId);
+    const batchId = packetRaw?.batch_id ? String(packetRaw.batch_id) : '';
+
+    const inv = batchId ? await getShopkeeperBatchInventoryFromChain(batchId) : { counts: { total: 0, sold: 0, unsold: 0 } };
+
+    res.status(200).json({
+      message: "Packet marked as sold (on-chain).",
+      packet_id: packetId,
+      txHash: receipt.hash,
+      batchId,
+      counts: inv.counts,
+    });
+  } catch (error) {
+    const msg = error?.error?.message || error?.reason || error?.message || String(error);
+    res.status(error.status || 500).json({ error: msg });
   }
 });
 

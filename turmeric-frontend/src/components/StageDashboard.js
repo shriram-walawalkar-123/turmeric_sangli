@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useStageAuth } from '../context/StageAuthContext';
 import { User, Shield, ArrowRight, Plus, Eye, BarChart3 } from 'lucide-react';
 import StageDataEntryForm from './StageDataEntryForm';
+import ShopkeeperPackets from './ShopkeeperPackets';
 
 const StageDashboard = () => {
   const { stageUser } = useStageAuth();
@@ -47,6 +48,10 @@ const StageDashboard = () => {
 
   if (activeView === 'data-entry') {
     return <StageDataEntryForm onBack={() => setActiveView('dashboard')} />;
+  }
+
+  if (activeView === 'packets') {
+    return <ShopkeeperPackets onBack={() => setActiveView('dashboard')} />;
   }
 
   return (
@@ -116,6 +121,16 @@ const StageDashboard = () => {
               <Plus size={20} />
               Add New Data Entry
             </button>
+
+            {stageUser?.stage === 'shopkeeper' && (
+              <button
+                onClick={() => setActiveView('packets')}
+                className="bg-white border-2 border-red-200 text-red-700 py-3 px-6 rounded-lg font-medium hover:bg-red-50 transition-all duration-200 flex items-center gap-2"
+              >
+                <BarChart3 size={20} />
+                Packets Inventory
+              </button>
+            )}
           </div>
         </div>
 

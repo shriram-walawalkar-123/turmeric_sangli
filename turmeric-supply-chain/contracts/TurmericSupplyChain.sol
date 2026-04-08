@@ -75,8 +75,16 @@ contract TurmericSupplyChain is AccessControl {
     mapping(string => Supplier) private suppliers;
     mapping(string => Shopkeeper) private shopkeepers;
 
+    // Shopkeeper: once sold, cannot be reverted (on-chain finality)
+    mapping(string => bool) private packetSold;
+
+    // NOTE: indexed string values are stored as a hash in logs, not the original string.
+    // For off-chain systems that must read the real packet_id, emit a non-indexed copy too.
     event PacketRegistered(string indexed unique_packet_id, string batch_id, string current_stage);
+    event PacketRegisteredPlain(string unique_packet_id, string batch_id, string current_stage);
     event PacketStageUpdated(string indexed unique_packet_id, string previous_stage, string new_stage);
+    event PacketStageUpdatedPlain(string unique_packet_id, string previous_stage, string new_stage);
+    event PacketSold(string indexed packet_id, string indexed batch_id, string shopkeeper_id);
 
     constructor(address admin) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
@@ -94,10 +102,12 @@ contract TurmericSupplyChain is AccessControl {
         if (!packets[p.packet_id].exists) {
             packets[p.packet_id] = Packet(p.packet_id, batch_id, "processing", true);
             emit PacketRegistered(p.packet_id, batch_id, "processing");
+            emit PacketRegisteredPlain(p.packet_id, batch_id, "processing");
         } else {
             string memory prev = packets[p.packet_id].current_stage;
             packets[p.packet_id].current_stage = "processing";
             emit PacketStageUpdated(p.packet_id, prev, "processing");
+            emit PacketStageUpdatedPlain(p.packet_id, prev, "processing");
         }
     }
 
@@ -108,6 +118,7 @@ contract TurmericSupplyChain is AccessControl {
             string memory prev = packets[packet_id].current_stage;
             packets[packet_id].current_stage = "distributor";
             emit PacketStageUpdated(packet_id, prev, "distributor");
+            emit PacketStageUpdatedPlain(packet_id, prev, "distributor");
         }
     }
 
@@ -118,6 +129,7 @@ contract TurmericSupplyChain is AccessControl {
             string memory prev = packets[packet_id].current_stage;
             packets[packet_id].current_stage = "supplier";
             emit PacketStageUpdated(packet_id, prev, "supplier");
+            emit PacketStageUpdatedPlain(packet_id, prev, "supplier");
         }
     }
 
@@ -128,12 +140,26 @@ contract TurmericSupplyChain is AccessControl {
             string memory prev = packets[packet_id].current_stage;
             packets[packet_id].current_stage = "shopkeeper";
             emit PacketStageUpdated(packet_id, prev, "shopkeeper");
+            emit PacketStageUpdatedPlain(packet_id, prev, "shopkeeper");
         }
     }
 
     function addPacket(string memory packet_id, Packet memory p) public onlyRole(PROCESSOR_ROLE) {
         packets[packet_id] = p;
         emit PacketRegistered(p.unique_packet_id, p.batch_id, p.current_stage);
+        emit PacketRegisteredPlain(p.unique_packet_id, p.batch_id, p.current_stage);
+    }
+
+    function markPacketSold(string memory packet_id, string memory shopkeeper_id) public onlyRole(SHOPKEEPER_ROLE) {
+        require(packets[packet_id].exists, "Packet does not exist");
+        require(
+            keccak256(bytes(packets[packet_id].current_stage)) == keccak256(bytes("shopkeeper")),
+            "Packet not at shopkeeper stage"
+        );
+        require(!packetSold[packet_id], "Packet already sold");
+
+        packetSold[packet_id] = true;
+        emit PacketSold(packet_id, packets[packet_id].batch_id, shopkeeper_id);
     }
 
     // ---------------- READ FUNCTIONS ----------------
@@ -161,5 +187,9 @@ contract TurmericSupplyChain is AccessControl {
         return shopkeepers[packet_id];
     }
 
-    
+    function isPacketSold(string memory packet_id) public view returns (bool) {
+        return packetSold[packet_id];
+    }
+
+ 
 }

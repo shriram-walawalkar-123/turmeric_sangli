@@ -12,8 +12,12 @@ const packetSchema = new mongoose.Schema({
     default: 'processing',
     index: true,
   },
+  is_sold: { type: Boolean, default: false, index: true },
+  sold_at: { type: Date, default: null },
+  sold_tx_hash: { type: String, default: '' },
 }, { timestamps: true });
 
 packetSchema.index({ batch_id: 1, current_stage: 1 });
+packetSchema.index({ batch_id: 1, current_stage: 1, is_sold: 1 });
 
 module.exports = mongoose.model('Packet', packetSchema);

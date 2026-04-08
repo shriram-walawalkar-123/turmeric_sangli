@@ -106,12 +106,20 @@ contract TurmericSupplyChain is AccessControl {
     // Ensure batch uniqueness per farmer (farmer_id + batch_id => exists)
     mapping(string => bool) private farmerBatchExists;
 
+    // Shopkeeper: once sold, cannot be reverted (on-chain finality)
+    mapping(string => bool) private packetSold;
+
+    // NOTE: indexed string values are stored as a hash in logs, not the original string.
+    // For off-chain systems that must read the real packet_id, emit a non-indexed copy too.
     event PacketRegistered(string indexed unique_packet_id, string batch_id, string current_stage);
+    event PacketRegisteredPlain(string unique_packet_id, string batch_id, string current_stage);
     event PacketStageUpdated(string indexed unique_packet_id, string previous_stage, string new_stage);
+    event PacketStageUpdatedPlain(string unique_packet_id, string previous_stage, string new_stage);
     event HarvestRegistered(string indexed farmer_id, string indexed batch_id);
     // Unindexed copy of harvest registration for easier off-chain querying
     event HarvestRecorded(string farmer_id, string batch_id);
     event PacketCountUpdated(string indexed batch_id, uint256 count);
+    event PacketSold(string indexed packet_id, string indexed batch_id, string shopkeeper_id);
 
     constructor(address admin) {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
@@ -165,6 +173,7 @@ contract TurmericSupplyChain is AccessControl {
         // Register packet
         packets[p.packet_id] = Packet(p.packet_id, batch_id, "processing", true);
         emit PacketRegistered(p.packet_id, batch_id, "processing");
+        emit PacketRegisteredPlain(p.packet_id, batch_id, "processing");
         emit PacketCountUpdated(batch_id, batchPacketCount[batch_id]);
     }
 
@@ -175,6 +184,7 @@ contract TurmericSupplyChain is AccessControl {
             string memory prev = packets[packet_id].current_stage;
             packets[packet_id].current_stage = "distributor";
             emit PacketStageUpdated(packet_id, prev, "distributor");
+            emit PacketStageUpdatedPlain(packet_id, prev, "distributor");
         }
     }
 
@@ -185,6 +195,7 @@ contract TurmericSupplyChain is AccessControl {
             string memory prev = packets[packet_id].current_stage;
             packets[packet_id].current_stage = "supplier";
             emit PacketStageUpdated(packet_id, prev, "supplier");
+            emit PacketStageUpdatedPlain(packet_id, prev, "supplier");
         }
     }
 
@@ -195,6 +206,7 @@ contract TurmericSupplyChain is AccessControl {
             string memory prev = packets[packet_id].current_stage;
             packets[packet_id].current_stage = "shopkeeper";
             emit PacketStageUpdated(packet_id, prev, "shopkeeper");
+            emit PacketStageUpdatedPlain(packet_id, prev, "shopkeeper");
         }
     }
 
@@ -205,7 +217,21 @@ contract TurmericSupplyChain is AccessControl {
         batchPacketCount[p.batch_id] = batchPacketCount[p.batch_id] + 1;
         packets[packet_id] = p;
         emit PacketRegistered(p.unique_packet_id, p.batch_id, p.current_stage);
+        emit PacketRegisteredPlain(p.unique_packet_id, p.batch_id, p.current_stage);
         emit PacketCountUpdated(p.batch_id, batchPacketCount[p.batch_id]);
+    }
+
+    // ---------------- SHOPKEEPER SALE (ONE-WAY) ----------------
+    function markPacketSold(string memory packet_id, string memory shopkeeper_id) public onlyRole(SHOPKEEPER_ROLE) {
+        require(packets[packet_id].exists, "Packet does not exist");
+        require(
+            keccak256(bytes(packets[packet_id].current_stage)) == keccak256(bytes("shopkeeper")),
+            "Packet not at shopkeeper stage"
+        );
+        require(!packetSold[packet_id], "Packet already sold");
+
+        packetSold[packet_id] = true;
+        emit PacketSold(packet_id, packets[packet_id].batch_id, shopkeeper_id);
     }
 
     /// @notice Register multiple packets in one transaction (avoids nonce issues when creating many packets).
@@ -218,29 +244,33 @@ contract TurmericSupplyChain is AccessControl {
             batchPacketCount[batch_id] = batchPacketCount[batch_id] + 1;
             packets[pid] = Packet(pid, batch_id, "processing", true);
             emit PacketRegistered(pid, batch_id, "processing");
+            emit PacketRegisteredPlain(pid, batch_id, "processing");
         }
         if (packet_ids.length > 0) {
             emit PacketCountUpdated(batch_id, batchPacketCount[batch_id]);
         }
     }
 
-    /// @notice Create multiple packets in one tx; contract generates unique IDs (keccak256(batchId, index, block.timestamp))-style uniqueness.
-    /// IDs are readable: farmerId-batchId-{weight}g-{seq}.
+    /// @notice Create multiple packets in one tx.
+    /// IDs are readable and unique within tx: farmerId-batchId-{weight}g-{seq}-{timestamp}.
     function createPackets(string memory batch_id, string memory farmer_id, uint256 count, uint256 weightPerPacketGm) public onlyRole(PROCESSOR_ROLE) {
         require(batchIds[batch_id], "Batch does not exist.");
         require(count > 0 && count <= 500, "Count must be 1-500");
         uint256 startIndex = batchPacketCount[batch_id];
+        string memory ts = _uint2str(block.timestamp);
         for (uint256 i = 0; i < count; i++) {
             uint256 seq = startIndex + i + 1;
             string memory packetId = string(abi.encodePacked(
                 farmer_id, "-", batch_id, "-", _uint2str(weightPerPacketGm), "g-",
-                _padSeq(seq)
+                _padSeq(seq), "-",
+                ts
             ));
             require(!packetExists[packetId], "Packet ID already exists");
             packetExists[packetId] = true;
             batchPacketCount[batch_id] = batchPacketCount[batch_id] + 1;
             packets[packetId] = Packet(packetId, batch_id, "processing", true);
             emit PacketRegistered(packetId, batch_id, "processing");
+            emit PacketRegisteredPlain(packetId, batch_id, "processing");
         }
         emit PacketCountUpdated(batch_id, batchPacketCount[batch_id]);
     }
@@ -329,5 +359,9 @@ contract TurmericSupplyChain is AccessControl {
     // Get batch-level processing for a batch
     function getBatchProcessing(string memory batch_id) public view returns (BatchProcessing memory) {
         return batchProcessings[batch_id];
+    }
+
+    function isPacketSold(string memory packet_id) public view returns (bool) {
+        return packetSold[packet_id];
     }
 }

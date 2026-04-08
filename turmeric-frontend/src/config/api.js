@@ -76,6 +76,15 @@ export const API = {
   distributorReceive: (data) => apiClient.post('/api/distributor/receive', data),
   supplierReceive: (data) => apiClient.post('/api/supplier/receive', data),
   shopkeeperReceive: (data) => apiClient.post('/api/shopkeeper/receive', data),
+
+  // Batches (flattened list)
+  getAllBatches: () => apiClient.get('/api/batches'),
+
+  // Shopkeeper: inventory + sale
+  getShopkeeperBatchPackets: (batchId, status = 'all') =>
+    apiClient.get(`/api/shopkeeper/batches/${batchId}/packets`, { params: { status } }),
+  markPacketSold: (packetId, shopkeeper_id) =>
+    apiClient.post(`/api/shopkeeper/packets/${packetId}/mark-sold`, { shopkeeper_id }),
 };
 
 export default apiClient;

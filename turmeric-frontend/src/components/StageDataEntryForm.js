@@ -469,7 +469,7 @@ const StageDataEntryForm = ({ onBack }) => {
                         onChange={e => setCreatePacketCount(e.target.value)} className={inputClass} required placeholder="e.g. 5" />
                     </FormField>
                   </div>
-                  <p className="mt-2 text-xs text-gray-500">Packet IDs format: FarmerId-BatchId-{packetSizeGm || '50'}g-001, 002, ...</p>
+                  <p className="mt-2 text-xs text-gray-500">Packet IDs format: FarmerId-BatchId-{packetSizeGm || '50'}g-001-{`{timestamp}`}, 002-{`{timestamp}`}, ...</p>
                 </div>
 
                 <div className="flex justify-end">
